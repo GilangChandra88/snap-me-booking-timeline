@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Resizable } from 're-resizable';
-import { Plus, X, GripVertical, Clock, User, Camera, ChevronLeft, ChevronRight, Move, ArrowRightLeft, Play, Volume2, Undo2, UserX, Moon, Sun } from 'lucide-react';
+import { Plus, X, GripVertical, Clock, User, Camera, ChevronLeft, ChevronRight, Move, ArrowRightLeft, Play, Undo2, UserX, Moon, Sun } from 'lucide-react';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Input } from './ui/input';
