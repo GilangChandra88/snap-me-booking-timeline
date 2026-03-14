@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Resizable } from 're-resizable';
-import { Plus, X, GripVertical, Clock, User, Camera, ChevronLeft, ChevronRight, Move, ArrowRightLeft, Play, Undo2, UserX, Moon, Sun } from 'lucide-react';
+import { Plus, X, GripVertical, Clock, User, Camera, ChevronLeft, ChevronRight, Move, ArrowRightLeft, Play, Undo2, UserX, Moon, Sun, Trash2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Input } from './ui/input';
@@ -9,15 +9,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { database } from '../lib/firebase';
 import { ref, set, onValue } from 'firebase/database';
 
-interface Booking {
+export interface Booking {
     id: string;
+    date?: string; // YYYY-MM-DD
     studioType: 'bawah' | 'atas';
     bookingType: string;
     customerName: string;
     startTime: number; // minutes from midnight
     duration: number; // minutes
     noShow?: boolean;
+    arrived?: boolean; // true when 'Mulai Sekarang' is clicked
 }
+
+export const getLocalYMD = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
 
 const STUDIO_BAWAH_TYPES = [
     'Basic Putih',
@@ -63,15 +72,50 @@ const STUDIO_COLORS = {
 };
 
 export function TimelineStudio() {
-    const [bookings, setBookings] = useState<Booking[]>([]);
+    const [allBookings, setAllBookings] = useState<Booking[]>([]);
+    const [selectedDate] = useState(() => getLocalYMD(new Date()));
+
+    // Derived state for the currently selected date
+    const bookings = useMemo<Booking[]>(() => {
+        const todayStr = getLocalYMD(new Date());
+        return allBookings.filter(b => (b.date || todayStr) === selectedDate);
+    }, [allBookings, selectedDate]);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [selectedStudio, setSelectedStudio] = useState<'bawah' | 'atas'>('bawah');
-    const [draggedBooking, setDraggedBooking] = useState<{ id: string; offsetX: number } | null>(null);
+    const [draggedBooking, setDraggedBooking] = useState<{ id: string; offsetX: number; startX: number; startY: number } | null>(null);
     const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+    const [selectedBookingIds, setSelectedBookingIds] = useState<Set<string>>(new Set());
     const [transferMode, setTransferMode] = useState(false);
     const [transferPackage, setTransferPackage] = useState('');
+    const [dropTransferPackages, setDropTransferPackages] = useState<Record<string, string>>({});
     const [undoHistory, setUndoHistory] = useState<Booking[][]>([]);
+
+    // Cross-studio Drag & Drop State
+    const [dropTransferData, setDropTransferData] = useState<{
+        bookingIds: string[],
+        targetStudio: 'bawah' | 'atas',
+        updatedSimulatedBookings: Booking[]
+    } | null>(null);
+
+    // Keep selectedBooking updated if its data changes
+    useEffect(() => {
+        if (selectedBooking) {
+            const updated = bookings.find(b => b.id === selectedBooking.id);
+            if (!updated) {
+                setSelectedBooking(null);
+            } else if (JSON.stringify(updated) !== JSON.stringify(selectedBooking)) {
+                setSelectedBooking(updated);
+            }
+        }
+    }, [bookings, selectedBooking]);
+
+    // Close detail dialog if multi-select mode is entered
+    useEffect(() => {
+        if (selectedBookingIds.size > 0) {
+            setSelectedBooking(null);
+        }
+    }, [selectedBookingIds]);
     const [darkMode, setDarkMode] = useState(() => {
         if (typeof window !== 'undefined') {
             return localStorage.getItem('snapme-dark') === 'true';
@@ -85,8 +129,11 @@ export function TimelineStudio() {
     const alarmPlayedRef = useRef<Set<string>>(new Set());
     const audioContextRef = useRef<AudioContext | null>(null);
     const firebaseWriteRef = useRef(false);
-    const bookingsRef = useRef<Booking[]>([]);
+    const allBookingsRef = useRef<Booking[]>([]);
     const wasDraggingRef = useRef(false);
+    const holdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const longPressFiredRef = useRef(false);
+    const dropZoneRef = useRef<'bawah' | 'atas' | null>(null);
 
     // Form state
     const [formData, setFormData] = useState({
@@ -115,17 +162,17 @@ export function TimelineStudio() {
             const data = snapshot.val();
             if (data) {
                 const loadedBookings: Booking[] = Object.values(data);
-                setBookings(loadedBookings);
-                bookingsRef.current = loadedBookings;
+                setAllBookings(loadedBookings);
+                allBookingsRef.current = loadedBookings;
             } else {
-                setBookings([]);
-                bookingsRef.current = [];
+                setAllBookings([]);
+                allBookingsRef.current = [];
             }
         });
         return () => unsubscribe();
     }, []);
 
-    // Save bookings to Firebase
+    // Save ALL bookings to Firebase
     const saveToFirebase = useCallback((newBookings: Booking[]) => {
         firebaseWriteRef.current = true;
         const bookingsDbRef = ref(database, 'bookings');
@@ -134,15 +181,23 @@ export function TimelineStudio() {
         set(bookingsDbRef, bookingsMap);
     }, []);
 
-    // Update bookings with undo support + Firebase sync
-    const updateBookings = useCallback((newBookings: Booking[], skipUndo = false) => {
+    // Update only current date's bookings without Firebase save (for dragging)
+    const setFilteredBookings = useCallback((newFiltered: Booking[]) => {
+        const todayStr = getLocalYMD(new Date());
+        const otherDates = allBookingsRef.current.filter(b => (b.date || todayStr) !== selectedDate);
+        const merged = [...otherDates, ...newFiltered];
+        setAllBookings(merged);
+        allBookingsRef.current = merged;
+    }, [selectedDate]);
+
+    // Update bookings for current date + save to Firebase + (optional) undo
+    const updateBookings = useCallback((newFiltered: Booking[], skipUndo = false) => {
         if (!skipUndo) {
-            setUndoHistory(prev => [...prev.slice(-20), bookingsRef.current]);
+            setUndoHistory(prev => [...prev.slice(-20), allBookingsRef.current]);
         }
-        setBookings(newBookings);
-        bookingsRef.current = newBookings;
-        saveToFirebase(newBookings);
-    }, [saveToFirebase]);
+        setFilteredBookings(newFiltered);
+        saveToFirebase(allBookingsRef.current);
+    }, [setFilteredBookings, saveToFirebase]);
 
     // Undo function
     const undo = useCallback(() => {
@@ -150,8 +205,8 @@ export function TimelineStudio() {
             if (prev.length === 0) return prev;
             const newHistory = [...prev];
             const previousState = newHistory.pop()!;
-            setBookings(previousState);
-            bookingsRef.current = previousState;
+            setAllBookings(previousState);
+            allBookingsRef.current = previousState;
             saveToFirebase(previousState);
             return newHistory;
         });
@@ -227,40 +282,36 @@ export function TimelineStudio() {
         }
     };
 
-    // Resolve collisions: only push blocks that are AFTER the moved block
-    const resolveCollisions = (allBookings: Booking[], movedId: string): Booking[] => {
-        const moved = allBookings.find(b => b.id === movedId);
-        if (!moved) return allBookings;
+    // Resolve collisions: push blocks that are AFTER the dragged block cluster
+    const resolveCollisions = (allBookings: Booking[], movedIds: Set<string>): Booking[] => {
+        const movedBlocks = allBookings.filter(b => movedIds.has(b.id));
+        if (movedBlocks.length === 0) return allBookings;
 
-        const studioType = moved.studioType;
-        const movedEnd = moved.startTime + moved.duration;
+        const studioType = movedBlocks[0].studioType;
+        const earliestMovedStart = Math.min(...movedBlocks.map(b => b.startTime));
 
         // Split into: blocks before the moved block (untouched) and blocks at/after (may need pushing)
         const beforeBlocks = allBookings
-            .filter(b => b.studioType === studioType && b.id !== movedId && b.startTime < moved.startTime)
+            .filter(b => b.studioType === studioType && !movedIds.has(b.id) && b.startTime < earliestMovedStart)
             .map(b => ({ ...b }));
         const afterBlocks = allBookings
-            .filter(b => b.studioType === studioType && b.id !== movedId && b.startTime >= moved.startTime)
+            .filter(b => b.studioType === studioType && !movedIds.has(b.id) && b.startTime >= earliestMovedStart)
             .map(b => ({ ...b }));
         const otherStudio = allBookings.filter(b => b.studioType !== studioType);
 
-        // Only push after-blocks that actually overlap with the moved block
-        for (const block of afterBlocks) {
-            if (block.startTime < movedEnd) {
-                block.startTime = movedEnd;
+        const combined = [...movedBlocks, ...afterBlocks].sort((a, b) => a.startTime - b.startTime);
+
+        for (let i = 0; i < combined.length - 1; i++) {
+            const endOfI = combined[i].startTime + combined[i].duration;
+            // If the next block overlaps and is NOT a moved block, push it
+            if (combined[i + 1].startTime < endOfI) {
+                if (!movedIds.has(combined[i + 1].id)) {
+                    combined[i + 1].startTime = endOfI;
+                }
             }
         }
 
-        // Cascade: fix any overlaps among the pushed blocks
-        afterBlocks.sort((a, b) => a.startTime - b.startTime);
-        for (let i = 0; i < afterBlocks.length - 1; i++) {
-            const endOfI = afterBlocks[i].startTime + afterBlocks[i].duration;
-            if (afterBlocks[i + 1].startTime < endOfI) {
-                afterBlocks[i + 1].startTime = endOfI;
-            }
-        }
-
-        return [...otherStudio, ...beforeBlocks, moved, ...afterBlocks];
+        return [...otherStudio, ...beforeBlocks, ...combined];
     };
 
     const addBooking = () => {
@@ -269,6 +320,7 @@ export function TimelineStudio() {
         const startTime = parseInt(formData.startHour) * 60 + parseInt(formData.startMinute);
         const newBooking: Booking = {
             id: Date.now().toString(),
+            date: selectedDate,
             studioType: selectedStudio,
             bookingType: formData.bookingType,
             customerName: formData.customerName,
@@ -276,7 +328,7 @@ export function TimelineStudio() {
             duration: MIN_DURATION,
         };
 
-        const updated = resolveCollisions([...bookings, newBooking], newBooking.id);
+        const updated = resolveCollisions([...bookings, newBooking], new Set([newBooking.id]));
         updateBookings(updated);
         setFormData({ customerName: '', bookingType: '', startHour: '09', startMinute: '00' });
         setIsAddDialogOpen(false);
@@ -320,8 +372,8 @@ export function TimelineStudio() {
 
     const moveToCurrentTime = (id: string) => {
         const now = currentTimeInMinutes;
-        const updated = bookings.map(b => b.id === id ? { ...b, startTime: now } : b);
-        const resolved = resolveCollisions(updated, id);
+        const updated = bookings.map(b => b.id === id ? { ...b, startTime: now, arrived: true } : b);
+        const resolved = resolveCollisions(updated, new Set([id]));
         updateBookings(resolved);
         const movedBooking = resolved.find(b => b.id === id);
         if (movedBooking) {
@@ -345,7 +397,7 @@ export function TimelineStudio() {
         const updated = bookings.map(b =>
             b.id === id ? { ...b, studioType: newStudio, bookingType: newPackage } : b
         );
-        updateBookings(resolveCollisions(updated, id));
+        updateBookings(resolveCollisions(updated, new Set([id])));
         setSelectedBooking(null);
         setTransferMode(false);
         setTransferPackage('');
@@ -394,65 +446,203 @@ export function TimelineStudio() {
     const updateBookingDuration = (id: string, newWidth: number) => {
         const newDuration = Math.max(MIN_DURATION, Math.round(newWidth / PIXEL_PER_MINUTE));
         const updated = bookings.map(b => b.id === id ? { ...b, duration: newDuration } : b);
-        updateBookings(resolveCollisions(updated, id));
+        updateBookings(resolveCollisions(updated, new Set([id])));
     };
 
-    const handleBookingMouseDown = (e: React.MouseEvent, bookingId: string, currentLeft: number) => {
-        e.preventDefault();
-        const offsetX = e.clientX - currentLeft;
+    const confirmDropTransfer = () => {
+        if (!dropTransferData) return;
+
+        // Ensure all transferred bookings have a package selected
+        const allSelected = dropTransferData.bookingIds.every(id => dropTransferPackages[id]);
+        if (!allSelected) return;
+
+        // Apply the new packages to all transferred bookings
+        const finalArray = dropTransferData.updatedSimulatedBookings.map(b => {
+            if (dropTransferData.bookingIds.includes(b.id) && dropTransferPackages[b.id]) {
+                return { ...b, bookingType: dropTransferPackages[b.id] };
+            }
+            return b;
+        });
+
+        // Resolve collisions in the new studio context
+        const resolved = resolveCollisions(finalArray, new Set(dropTransferData.bookingIds));
+        updateBookings(resolved);
+
+        // Clear
+        setDropTransferData(null);
+        setDropTransferPackages({});
+        setSelectedBookingIds(new Set());
+    };
+
+    const cancelDropTransfer = () => {
+        setDropTransferData(null);
+        setDropTransferPackages({});
+        setFilteredBookings(allBookingsRef.current); // Revert UI
+    };
+
+    const handleBookingMouseDown = (e: React.MouseEvent | React.TouchEvent, bookingId: string, currentLeft: number) => {
+        // Don't prevent default blindly on touch, but we can stop propagation
+        e.stopPropagation();
+        const isTouch = 'touches' in e;
+        const clientX = isTouch ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+        const clientY = isTouch ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+
+        const offsetX = clientX - currentLeft;
         // Save snapshot of all bookings BEFORE drag starts (for undo + drag recovery)
-        setUndoHistory(prev => [...prev.slice(-20), bookings]);
-        dragOriginalBookingsRef.current = bookings.map(b => ({ ...b }));
-        setDraggedBooking({ id: bookingId, offsetX });
+        setUndoHistory(prev => [...prev.slice(-20), allBookingsRef.current]);
+        dragOriginalBookingsRef.current = bookings.map((b: Booking) => ({ ...b }));
+
+        longPressFiredRef.current = false;
+
+        // Start long press timer
+        holdTimeoutRef.current = setTimeout(() => {
+            longPressFiredRef.current = true;
+            setSelectedBookingIds(prev => {
+                const next = new Set(prev);
+                next.add(bookingId);
+                return next;
+            });
+            if (navigator.vibrate) {
+                try { navigator.vibrate(50); } catch (err) { }
+            }
+        }, 300); // 300ms for long press
+
+        setDraggedBooking({ id: bookingId, offsetX, startX: clientX, startY: clientY });
     };
 
     useEffect(() => {
-        const handleMouseMove = (e: MouseEvent) => {
+        const handleMouseMove = (e: MouseEvent | TouchEvent) => {
             if (draggedBooking && dragOriginalBookingsRef.current) {
-                const booking = dragOriginalBookingsRef.current.find(b => b.id === draggedBooking.id);
+                const isTouch = 'touches' in e;
+                const clientX = isTouch ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
+                const clientY = isTouch ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
+
+                // Threshold check to avoid accidental minuscule drags
+                const threshold = isTouch ? 15 : 5;
+                if (!wasDraggingRef.current && Math.abs(clientX - draggedBooking.startX) < threshold && Math.abs(clientY - draggedBooking.startY) < threshold) {
+                    return;
+                }
+
+                if (holdTimeoutRef.current) {
+                    clearTimeout(holdTimeoutRef.current);
+                    holdTimeoutRef.current = null;
+                }
+
+                wasDraggingRef.current = true;
+
+                const booking = dragOriginalBookingsRef.current.find((b: Booking) => b.id === draggedBooking.id);
                 if (!booking) return;
 
-                const scrollContainer = booking.studioType === 'bawah' ? scrollContainerBawahRef.current : scrollContainerAtasRef.current;
-                if (!scrollContainer) return;
+                // Detect Cross-Studio Hover
+                const containerRectBawah = scrollContainerBawahRef.current?.getBoundingClientRect();
+                const containerRectAtas = scrollContainerAtasRef.current?.getBoundingClientRect();
 
-                const containerRect = scrollContainer.getBoundingClientRect();
-                const relativeX = e.clientX - containerRect.left + scrollContainer.scrollLeft - draggedBooking.offsetX;
+                let isHoveringOther: 'bawah' | 'atas' | null = null;
+                if (booking.studioType === 'bawah' && containerRectAtas && clientY >= containerRectAtas.top && clientY <= containerRectAtas.bottom) {
+                    isHoveringOther = 'atas';
+                } else if (booking.studioType === 'atas' && containerRectBawah && clientY >= containerRectBawah.top && clientY <= containerRectBawah.bottom) {
+                    isHoveringOther = 'bawah';
+                }
+
+                if (dropZoneRef.current !== isHoveringOther) {
+                    dropZoneRef.current = isHoveringOther;
+                }
+
+                const targetStudio = dropZoneRef.current || booking.studioType;
+                const activeScrollContainer = targetStudio === 'bawah' ? scrollContainerBawahRef.current : scrollContainerAtasRef.current;
+
+                if (!activeScrollContainer) return;
+
+                const containerRect = activeScrollContainer.getBoundingClientRect();
+                const relativeX = clientX - containerRect.left + activeScrollContainer.scrollLeft - draggedBooking.offsetX;
                 const newStartTime = Math.max(0, Math.min(Math.round(relativeX / PIXEL_PER_MINUTE), 24 * 60 - MIN_DURATION));
+                const timeDelta = newStartTime - booking.startTime;
+
+                // Move all selected items if the dragging item is selected, otherwise just move the dragging item
+                const movedIds = selectedBookingIds.has(draggedBooking.id) ? selectedBookingIds : new Set([draggedBooking.id]);
 
                 // Always recalculate from the ORIGINAL snapshot, not from the current (already-pushed) state
-                const updated = dragOriginalBookingsRef.current.map(b =>
-                    b.id === draggedBooking.id ? { ...b, startTime: newStartTime } : b
-                );
-                setBookings(resolveCollisions(updated, draggedBooking.id));
-                wasDraggingRef.current = true;
+                const updated = dragOriginalBookingsRef.current.map((b: Booking) => {
+                    if (movedIds.has(b.id)) {
+                        const newTime = Math.max(0, Math.min(b.startTime + timeDelta, 24 * 60 - b.duration));
+                        return { ...b, startTime: newTime, studioType: targetStudio };
+                    }
+                    return b;
+                });
+
+                // Real-time grouping visualization inside the target studio
+                setFilteredBookings(resolveCollisions(updated, movedIds));
             }
         };
 
         const handleMouseUp = () => {
+            if (holdTimeoutRef.current) {
+                clearTimeout(holdTimeoutRef.current);
+                holdTimeoutRef.current = null;
+            }
+
+            if (wasDraggingRef.current) {
+                if (dropZoneRef.current) {
+                    // Trigger transfer dialog
+                    const movedIdsArray = Array.from(selectedBookingIds.has(draggedBooking?.id || '') ? selectedBookingIds : new Set([draggedBooking!.id]));
+                    setDropTransferData({
+                        bookingIds: movedIdsArray,
+                        targetStudio: dropZoneRef.current,
+                        updatedSimulatedBookings: allBookingsRef.current // The visually updated state
+                    });
+
+                    // Pre-fill empty selections if available
+                    const initialAcc: Record<string, string> = {};
+                    movedIdsArray.forEach(id => { initialAcc[id] = ''; });
+                    setDropTransferPackages(initialAcc);
+                } else {
+                    // Save final drag state to Firebase + undo — read from latest state
+                    saveToFirebase(allBookingsRef.current);
+                }
+            }
+
+            dropZoneRef.current = null;
             dragOriginalBookingsRef.current = null;
             setDraggedBooking(null);
-            // Save final drag state to Firebase + undo — read from latest state
-            setBookings(current => {
-                bookingsRef.current = current;
-                saveToFirebase(current);
-                return current;
-            });
         };
 
         if (draggedBooking) {
             document.addEventListener('mousemove', handleMouseMove);
             document.addEventListener('mouseup', handleMouseUp);
+            document.addEventListener('touchmove', handleMouseMove, { passive: false });
+            document.addEventListener('touchend', handleMouseUp);
+            document.addEventListener('touchcancel', handleMouseUp);
         }
 
         return () => {
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
+            document.removeEventListener('touchmove', handleMouseMove);
+            document.removeEventListener('touchend', handleMouseUp);
+            document.removeEventListener('touchcancel', handleMouseUp);
         };
     }, [draggedBooking]);
+
+
+
+    const handleContainerMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
+        const isTouch = 'touches' in e;
+        // For mouse, only trigger on Left Click (button 0)
+        if (!isTouch && (e as React.MouseEvent).button !== 0) return;
+
+        if ((e.target as HTMLElement).closest('.react-resizable') || (e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.booking-block')) {
+            return;
+        }
+
+        // Tap on empty space clears all selections
+        setSelectedBookingIds(new Set());
+        setSelectedBooking(null);
+    };
 
     const getActiveBookings = () => {
         return bookings.filter(booking => {
             if (booking.noShow) return false;
+            if (!booking.arrived) return false;
             const bookingStart = booking.startTime;
             const bookingEnd = booking.startTime + booking.duration;
             return currentTimeInMinutes >= bookingStart && currentTimeInMinutes < bookingEnd;
@@ -549,8 +739,23 @@ export function TimelineStudio() {
                 wasDraggingRef.current = false;
                 return;
             }
-            if (!draggedBooking) {
-                e.stopPropagation();
+            if (longPressFiredRef.current) {
+                longPressFiredRef.current = false;
+                return;
+            }
+
+            e.stopPropagation();
+            if (selectedBookingIds.size > 0) {
+                setSelectedBookingIds(prev => {
+                    const next = new Set(prev);
+                    if (next.has(booking.id)) {
+                        next.delete(booking.id);
+                    } else {
+                        next.add(booking.id);
+                    }
+                    return next;
+                });
+            } else {
                 setSelectedBooking(booking);
             }
         };
@@ -571,12 +776,31 @@ export function TimelineStudio() {
                         </div>
                     )
                 }}
-                className={`group ${isDragging ? 'z-50' : 'z-10'}`}
+                className={`booking-block group ${isDragging ? 'z-50' : selectedBookingIds.has(booking.id) ? 'z-40' : 'z-10'}`}
                 style={{ position: 'absolute', left: `${left}px`, bottom: '4px' }}
             >
                 <div
-                    className={`h-full w-full bg-gradient-to-br ${pkgColors.gradient} ${pkgColors.hover} rounded-lg ${isNarrow ? 'px-2 py-1.5' : 'px-3 py-2'} flex items-center justify-between border-2 ${pkgColors.border} shadow-lg transition-all duration-200 hover:shadow-xl relative overflow-hidden ${isDragging ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab'} ${booking.noShow ? 'opacity-50 grayscale' : ''}`}
+                    className={`h-full w-full bg-gradient-to-br ${pkgColors.gradient} ${pkgColors.hover} rounded-lg ${isNarrow ? 'px-2 py-1.5' : 'px-3 py-2'} flex items-center justify-between border-2 ${pkgColors.border} shadow-lg transition-all duration-200 hover:shadow-xl relative overflow-hidden ${isDragging ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab'} ${booking.noShow ? 'opacity-50 grayscale' : ''} ${selectedBookingIds.has(booking.id) ? 'ring-4 ring-blue-500 ring-offset-2 border-blue-400' : ''}`}
+                    style={{
+                        touchAction: 'none',
+                        WebkitUserSelect: 'none',
+                        userSelect: 'none',
+                        WebkitTouchCallout: 'none'
+                    }}
+                    onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }}
                     onMouseDown={(e) => {
+                        e.stopPropagation();
+                        if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('[class*="cursor-ew-resize"]')) {
+                            return;
+                        }
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        handleBookingMouseDown(e, booking.id, rect.left);
+                    }}
+                    onTouchStart={(e) => {
+                        e.stopPropagation();
                         if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('[class*="cursor-ew-resize"]')) {
                             return;
                         }
@@ -619,12 +843,6 @@ export function TimelineStudio() {
                             </>
                         )}
                     </div>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); deleteBooking(booking.id); }}
-                        className="ml-2 p-1.5 bg-red-500 hover:bg-red-600 rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 z-10 shadow-md pointer-events-auto"
-                    >
-                        <X className="w-3.5 h-3.5 text-white" />
-                    </button>
                 </div>
             </Resizable>
         );
@@ -678,20 +896,20 @@ export function TimelineStudio() {
     };
 
     return (
-        <div className={`flex flex-col h-full transition-colors duration-300 ${dm.root}`}>
+        <div className={`flex flex-col h-full overflow-y-auto w-full transition-colors duration-300 ${dm.root}`}>
             {/* Timer Cards + Daily Recap Section */}
-            <div className={`${dm.topSection} border-b-2 p-6 min-h-[180px] backdrop-blur-sm`}>
-                <div className="flex gap-6">
+            <div className={`${dm.topSection} flex-shrink-0 border-b-2 p-4 md:p-6 min-h-[180px] backdrop-blur-sm`}>
+                <div className="flex flex-col lg:flex-row gap-6">
                     {/* Timer Cards - Left Side */}
                     <div className="flex-1 min-w-0">
                         {activeBookings.length > 0 ? (
-                            <div className="flex gap-5 flex-wrap">
+                            <div className="flex gap-4 md:gap-5 flex-row overflow-x-auto pb-2 snap-x">
                                 {activeBookings.map(renderTimerCard)}
                             </div>
                         ) : (
                             <div className={`h-full flex flex-col items-center justify-center ${dm.emptyText} min-h-[140px]`}>
                                 <Clock className="w-12 h-12 mb-3 opacity-30" />
-                                <p className="text-sm">Tidak ada booking aktif saat ini</p>
+                                <p className="text-sm text-center">Tidak ada booking aktif saat ini</p>
                             </div>
                         )}
                     </div>
@@ -714,7 +932,7 @@ export function TimelineStudio() {
                         const activeCount = activeBookings.length;
 
                         return (
-                            <div className={`flex-shrink-0 w-[320px] ${dm.recapPanel} rounded-xl border p-4 shadow-sm`}>
+                            <div className={`flex-shrink-0 w-full lg:w-[320px] ${dm.recapPanel} rounded-xl border p-4 shadow-sm z-10 relative`}>
                                 <div className="flex items-center gap-2 mb-3">
                                     <div className="p-1.5 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg">
                                         <Camera className="w-4 h-4 text-white" />
@@ -771,13 +989,13 @@ export function TimelineStudio() {
             </div>
 
             {/* Current Time Display */}
-            <div className={`${dm.timeBar} border-b px-8 py-3 flex items-center justify-between shadow-sm`}>
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
+            <div className={`${dm.timeBar} flex-shrink-0 border-b px-4 md:px-8 py-3 flex flex-col lg:flex-row sm:items-center justify-between shadow-sm gap-4`}>
+                <div className="flex flex-col sm:flex-row items-center gap-4">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
                         <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
                         <span className={`text-sm ${dm.timeBarText}`}>Waktu Saat Ini:</span>
                     </div>
-                    <div className={`${dm.timeBg} border-2 rounded-lg px-4 py-2`}>
+                    <div className={`${dm.timeBg} border-2 rounded-lg px-4 py-2 w-full sm:w-auto text-center`}>
                         <span className="text-2xl font-bold text-red-600 tabular-nums">
                             {currentTime.getHours().toString().padStart(2, '0')}:
                             {currentTime.getMinutes().toString().padStart(2, '0')}:
@@ -788,17 +1006,17 @@ export function TimelineStudio() {
                         {currentTime.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex justify-center items-center gap-2 flex-wrap sm:flex-nowrap w-full sm:w-auto">
                     <Button
                         variant="outline"
                         size="sm"
                         onClick={undo}
                         disabled={undoHistory.length === 0}
-                        className="flex items-center gap-2"
+                        className="flex items-center gap-2 flex-1 sm:flex-none"
                         title="Undo (Ctrl+Z)"
                     >
                         <Undo2 className="w-4 h-4" />
-                        Undo
+                        <span className="hidden sm:inline">Undo</span>
                         {undoHistory.length > 0 && (
                             <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                                 {undoHistory.length}
@@ -809,14 +1027,15 @@ export function TimelineStudio() {
                         variant="outline"
                         size="sm"
                         onClick={jumpToCurrentTime}
-                        className="flex items-center gap-2"
+                        className="flex items-center gap-2 flex-1 sm:flex-none"
                     >
                         <Clock className="w-4 h-4" />
-                        Jump to Now
+                        <span className="hidden sm:inline">Jump to Now</span>
                     </Button>
                     <Button
                         variant="outline"
                         size="sm"
+                        className="hidden sm:flex"
                         onClick={() => scrollTimeline('left')}
                     >
                         <ChevronLeft className="w-4 h-4" />
@@ -824,6 +1043,7 @@ export function TimelineStudio() {
                     <Button
                         variant="outline"
                         size="sm"
+                        className="hidden sm:flex"
                         onClick={() => scrollTimeline('right')}
                     >
                         <ChevronRight className="w-4 h-4" />
@@ -831,6 +1051,7 @@ export function TimelineStudio() {
                     <Button
                         variant="outline"
                         size="sm"
+                        className="flex-1 sm:flex-none"
                         onClick={toggleDarkMode}
                         title={darkMode ? 'Light Mode' : 'Dark Mode'}
                     >
@@ -840,12 +1061,12 @@ export function TimelineStudio() {
             </div>
 
             {/* Timeline Section */}
-            <div className={`flex-1 overflow-hidden ${dm.timelineSection}`}>
-                <div className="p-8 space-y-10">
+            <div className={`flex-1 min-h-[500px] ${dm.timelineSection}`}>
+                <div className="p-4 md:p-8 space-y-10">
                     {/* Studio Bawah */}
-                    <div className="flex gap-4">
+                    <div className="flex flex-col xl:flex-row gap-4">
                         {/* Fixed Studio Header */}
-                        <div className="flex-shrink-0 w-64">
+                        <div className="flex-shrink-0 w-full xl:w-64">
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center gap-3">
                                     <div className="p-2 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg shadow-md">
@@ -945,10 +1166,16 @@ export function TimelineStudio() {
                         </div>
 
                         {/* Scrollable Timeline */}
-                        <div className="flex-1 overflow-x-auto overflow-y-hidden timeline-scroll" ref={scrollContainerBawahRef} onScroll={(e) => syncScroll('bawah', e.currentTarget.scrollLeft)}>
+                        <div
+                            className="flex-1 overflow-x-auto overflow-y-hidden timeline-scroll relative"
+                            ref={scrollContainerBawahRef}
+                            onScroll={(e) => syncScroll('bawah', e.currentTarget.scrollLeft)}
+                            onMouseDownCapture={(e) => handleContainerMouseDown(e)}
+                            onTouchStartCapture={(e) => handleContainerMouseDown(e)}
+                        >
                             <div className={`relative h-[100px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
                                 {/* Background grid pattern */}
-                                <div className={`absolute inset-0 ${dm.gridPattern}`}>
+                                <div className={`absolute inset-0 ${dm.gridPattern} pointer-events-none`}>
                                     <div className="absolute inset-0 bg-[linear-gradient(to_right,#000_1px,transparent_1px),linear-gradient(to_bottom,#000_1px,transparent_1px)] bg-[size:30px_30px]"></div>
                                 </div>
 
@@ -977,9 +1204,9 @@ export function TimelineStudio() {
                     </div>
 
                     {/* Studio Atas */}
-                    <div className="flex gap-4">
+                    <div className="flex flex-col xl:flex-row gap-4">
                         {/* Fixed Studio Header */}
-                        <div className="flex-shrink-0 w-64">
+                        <div className="flex-shrink-0 w-full xl:w-64">
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center gap-3">
                                     <div className="p-2 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg shadow-md">
@@ -1079,10 +1306,16 @@ export function TimelineStudio() {
                         </div>
 
                         {/* Scrollable Timeline */}
-                        <div className="flex-1 overflow-x-auto overflow-y-hidden timeline-scroll" ref={scrollContainerAtasRef} onScroll={(e) => syncScroll('atas', e.currentTarget.scrollLeft)}>
+                        <div
+                            className="flex-1 overflow-x-auto overflow-y-hidden timeline-scroll relative"
+                            ref={scrollContainerAtasRef}
+                            onScroll={(e) => syncScroll('atas', e.currentTarget.scrollLeft)}
+                            onMouseDownCapture={(e) => handleContainerMouseDown(e)}
+                            onTouchStartCapture={(e) => handleContainerMouseDown(e)}
+                        >
                             <div className={`relative h-[120px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
                                 {/* Background grid pattern */}
-                                <div className={`absolute inset-0 ${dm.gridPattern}`}>
+                                <div className={`absolute inset-0 ${dm.gridPattern} pointer-events-none`}>
                                     <div className="absolute inset-0 bg-[linear-gradient(to_right,#000_1px,transparent_1px),linear-gradient(to_bottom,#000_1px,transparent_1px)] bg-[size:30px_30px]"></div>
                                 </div>
 
@@ -1112,9 +1345,54 @@ export function TimelineStudio() {
                 </div>
             </div>
 
+            {/* Bulk Actions Toolbar */}
+            {
+                selectedBookingIds.size > 1 && (
+                    <div className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 flex items-center justify-between sm:justify-center gap-2 sm:gap-4 z-50 animate-in slide-in-from-bottom-5 w-[95vw] sm:w-auto bg-gray-900 border border-gray-700 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-xl sm:rounded-full shadow-2xl">
+                        <span className="text-xs sm:text-sm font-medium whitespace-nowrap hidden sm:inline-flex items-center">
+                            <span className="w-5 h-5 sm:w-6 sm:h-6 inline-flex items-center justify-center bg-blue-500 text-white rounded-full mr-1.5 sm:mr-2 text-[10px] sm:text-xs font-bold">
+                                {selectedBookingIds.size}
+                            </span>
+                            Booking Terpilih
+                        </span>
+                        <span className="text-xs font-medium sm:hidden flex items-center bg-blue-500/20 px-2 py-1 rounded-md text-blue-300">
+                            {selectedBookingIds.size} dipilih
+                        </span>
+                        <div className="h-6 w-px bg-gray-700 hidden sm:block"></div>
+                        <div className="flex items-center gap-1 sm:gap-2">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-gray-300 hover:text-white hover:bg-gray-800 text-xs sm:text-sm px-2 sm:px-3 h-8 sm:h-9"
+                                onClick={() => setSelectedBookingIds(new Set())}
+                            >
+                                <span className="hidden sm:inline">Batal</span>
+                                <span className="sm:hidden"><X className="w-4 h-4" /></span>
+                            </Button>
+                            <Button
+                                size="sm"
+                                className="flex items-center gap-1.5 sm:gap-2 bg-red-600 hover:bg-red-700 text-white font-medium border-0 text-xs sm:text-sm px-2 sm:px-3 h-8 sm:h-9"
+                                onClick={() => {
+                                    if (window.confirm(`Yakin ingin menghapus secara permanen ${selectedBookingIds.size} booking yang dipilih? \n\n(Aksi ini masih bisa di-Undo menggunakan Ctrl+Z)`)) {
+                                        setUndoHistory(prev => [...prev.slice(-20), allBookingsRef.current]);
+                                        const updated = bookings.filter(b => !selectedBookingIds.has(b.id));
+                                        setFilteredBookings(updated);
+                                        setSelectedBookingIds(new Set());
+                                    }
+                                }}
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                <span className="hidden sm:inline">Hapus Bersamaan</span>
+                                <span className="sm:hidden">Hapus</span>
+                            </Button>
+                        </div>
+                    </div>
+                )
+            }
+
             {/* Booking Detail Dialog */}
             <Dialog open={!!selectedBooking} onOpenChange={(open) => { if (!open) { setSelectedBooking(null); setTransferMode(false); setTransferPackage(''); } }}>
-                <DialogContent className="sm:max-w-[420px]">
+                <DialogContent className="w-[95vw] max-w-[420px] rounded-xl sm:rounded-2xl p-4 sm:p-6 overflow-y-auto max-h-[90vh]">
                     {selectedBooking && (() => {
                         const pkg = PACKAGE_COLORS[selectedBooking.bookingType] || DEFAULT_PACKAGE_COLOR;
                         const timeStr = `${Math.floor(selectedBooking.startTime / 60).toString().padStart(2, '0')}:${(selectedBooking.startTime % 60).toString().padStart(2, '0')}`;
@@ -1125,58 +1403,58 @@ export function TimelineStudio() {
                         return (
                             <>
                                 <DialogHeader>
-                                    <DialogTitle className="flex items-center gap-2">
-                                        <Camera className="w-5 h-5" />
+                                    <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+                                        <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
                                         Detail Booking
                                     </DialogTitle>
                                 </DialogHeader>
-                                <div className="space-y-4 py-2">
-                                    <div className={`bg-gradient-to-br ${pkg.gradient} rounded-lg p-4 ${pkg.textDark ? 'text-gray-800' : 'text-white'} shadow-md`}>
-                                        <p className="text-lg font-bold">{selectedBooking.customerName}</p>
-                                        <p className="text-sm opacity-90">{selectedBooking.bookingType}</p>
+                                <div className="space-y-3 sm:space-y-4 py-2">
+                                    <div className={`bg-gradient-to-br ${pkg.gradient} rounded-lg p-3 sm:p-4 ${pkg.textDark ? 'text-gray-800' : 'text-white'} shadow-md`}>
+                                        <p className="text-base sm:text-lg font-bold truncate">{selectedBooking.customerName}</p>
+                                        <p className="text-xs sm:text-sm opacity-90 truncate">{selectedBooking.bookingType}</p>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="bg-gray-50 rounded-lg p-3">
-                                            <p className="text-[11px] text-gray-500 uppercase font-medium mb-1">Studio</p>
-                                            <p className="text-sm font-semibold text-gray-800">
-                                                Studio {selectedBooking.studioType === 'bawah' ? 'Bawah' : 'Atas'}
+                                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                                        <div className="bg-gray-50 rounded-lg p-2 sm:p-3">
+                                            <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Studio</p>
+                                            <p className="text-xs sm:text-sm font-semibold text-gray-800">
+                                                St. {selectedBooking.studioType === 'bawah' ? 'Bawah' : 'Atas'}
                                             </p>
                                         </div>
-                                        <div className="bg-gray-50 rounded-lg p-3">
-                                            <p className="text-[11px] text-gray-500 uppercase font-medium mb-1">Paket</p>
-                                            <p className="text-sm font-semibold text-gray-800">{selectedBooking.bookingType}</p>
+                                        <div className="bg-gray-50 rounded-lg p-2 sm:p-3 overflow-hidden">
+                                            <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Paket</p>
+                                            <p className="text-xs sm:text-sm font-semibold text-gray-800 truncate">{selectedBooking.bookingType}</p>
                                         </div>
-                                        <div className="bg-gray-50 rounded-lg p-3">
-                                            <p className="text-[11px] text-gray-500 uppercase font-medium mb-1">Waktu</p>
-                                            <p className="text-sm font-semibold text-gray-800">{timeStr} - {endTimeStr}</p>
+                                        <div className="bg-gray-50 rounded-lg p-2 sm:p-3">
+                                            <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Waktu</p>
+                                            <p className="text-xs sm:text-sm font-semibold text-gray-800">{timeStr} - {endTimeStr}</p>
                                         </div>
-                                        <div className="bg-gray-50 rounded-lg p-3">
-                                            <p className="text-[11px] text-gray-500 uppercase font-medium mb-1">Status</p>
-                                            <p className={`text-sm font-semibold ${selectedBooking.noShow ? 'text-red-600' : 'text-emerald-600'}`}>
-                                                {selectedBooking.noShow ? '❌ Tidak Datang' : '✅ Aktif'}
+                                        <div className="bg-gray-50 rounded-lg p-2 sm:p-3 overflow-hidden">
+                                            <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Status</p>
+                                            <p className={`text-xs sm:text-sm font-semibold truncate ${selectedBooking.noShow ? 'text-red-600' : selectedBooking.arrived ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                                {selectedBooking.noShow ? '❌ Tidak Datang' : selectedBooking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
                                             </p>
                                         </div>
                                     </div>
 
                                     {/* Action Buttons */}
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-col sm:flex-row gap-2">
                                         <Button
-                                            className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white"
+                                            className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white text-xs sm:text-sm h-9 sm:h-10"
                                             onClick={() => {
                                                 moveToCurrentTime(selectedBooking.id);
                                             }}
                                         >
-                                            <Play className="w-4 h-4 mr-1" />
+                                            <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
                                             Mulai Sekarang
                                         </Button>
                                         <Button
                                             variant="outline"
-                                            className="flex-1"
+                                            className="flex-1 text-xs sm:text-sm h-9 sm:h-10"
                                             onClick={() => { setTransferMode(!transferMode); setTransferPackage(''); }}
                                         >
-                                            <ArrowRightLeft className="w-4 h-4 mr-1" />
-                                            Pindah ke Studio {destStudio === 'bawah' ? 'Bawah' : 'Atas'}
+                                            <ArrowRightLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
+                                            Pindah Studio
                                         </Button>
                                     </div>
 
@@ -1214,8 +1492,7 @@ export function TimelineStudio() {
                                     </Button>
 
                                     <Button
-                                        variant="destructive"
-                                        className="w-full"
+                                        className="w-full bg-red-600 hover:bg-red-700 text-white font-medium"
                                         onClick={() => {
                                             deleteBooking(selectedBooking.id);
                                             setSelectedBooking(null);
@@ -1228,6 +1505,60 @@ export function TimelineStudio() {
                             </>
                         );
                     })()}
+                </DialogContent>
+            </Dialog>
+
+            {/* Drop Transfer Dialog */}
+            <Dialog open={!!dropTransferData} onOpenChange={(o) => { if (!o) cancelDropTransfer(); }}>
+                <DialogContent className="sm:max-w-[400px]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <ArrowRightLeft className="w-5 h-5 text-blue-600" />
+                            Pindah Studio
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <p className="text-sm text-gray-700">
+                            Anda memindahkan {dropTransferData?.bookingIds.length} booking ke Studio {dropTransferData?.targetStudio === 'bawah' ? 'Bawah' : 'Atas'}. Silakan pilih paket penyesuaian untuk masing-masing:
+                        </p>
+
+                        <div className="max-h-[300px] overflow-y-auto pr-2 space-y-3">
+                            {dropTransferData?.bookingIds.map(id => {
+                                const b = allBookingsRef.current.find(xb => xb.id === id);
+                                if (!b) return null;
+                                return (
+                                    <div key={id} className="p-3 bg-gray-50 border border-gray-200 rounded-md">
+                                        <p className="text-xs font-semibold text-gray-800 mb-1">{b.customerName}</p>
+                                        <p className="text-[10px] text-gray-500 mb-2">Pindahan dari: {b.bookingType}</p>
+                                        <Select
+                                            value={dropTransferPackages[id] || ''}
+                                            onValueChange={(val) => setDropTransferPackages(prev => ({ ...prev, [id]: val }))}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs">
+                                                <SelectValue placeholder="Pilih Paket Baru..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {(dropTransferData?.targetStudio === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES).map(type => (
+                                                    <SelectItem key={type} value={type} className="text-xs">{type}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        <div className="flex gap-2 justify-end mt-4 pt-2 border-t border-gray-100">
+                            <Button variant="outline" onClick={cancelDropTransfer}>Batal</Button>
+                            <Button
+                                className="bg-blue-600 hover:bg-blue-700 text-white"
+                                disabled={!dropTransferData || dropTransferData.bookingIds.some(id => !dropTransferPackages[id])}
+                                onClick={confirmDropTransfer}
+                            >
+                                Konfirmasi Semua
+                            </Button>
+                        </div>
+                    </div>
                 </DialogContent>
             </Dialog>
         </div>
