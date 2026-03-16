@@ -390,6 +390,13 @@ export function TimelineStudio() {
         if (updatedBooking) setSelectedBooking(updatedBooking);
     };
 
+    const markArrived = (id: string) => {
+        const updated = bookings.map(b =>
+            b.id === id ? { ...b, arrived: true } : b
+        );
+        updateBookings(updated);
+    };
+
     const transferStudio = (id: string, newPackage: string) => {
         const booking = bookings.find(b => b.id === id);
         if (!booking) return;
@@ -763,7 +770,7 @@ export function TimelineStudio() {
         return (
             <Resizable
                 key={booking.id}
-                size={{ width, height: 70 }}
+                size={{ width, height: 86 }}
                 minWidth={MIN_DURATION * PIXEL_PER_MINUTE}
                 enable={{ right: true }}
                 onResizeStop={(_e, _direction, _ref, d) => {
@@ -843,6 +850,36 @@ export function TimelineStudio() {
                             </>
                         )}
                     </div>
+
+                    {/* Status badge + Datang button */}
+                    {!booking.noShow && (
+                        <div className="absolute bottom-1 right-1 flex items-center gap-1 z-20 pointer-events-auto">
+                            {!booking.arrived && (
+                                <>
+                                    <span className="text-[9px] font-bold bg-amber-400 text-amber-900 px-1.5 py-0.5 rounded-full shadow-sm leading-none">
+                                        ⏳ Belum
+                                    </span>
+                                    <button
+                                        className="text-[9px] font-bold bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white px-1.5 py-0.5 rounded-full shadow-sm leading-none transition-colors"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            markArrived(booking.id);
+                                        }}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onTouchStart={(e) => e.stopPropagation()}
+                                        title="Tandai customer telah datang"
+                                    >
+                                        ✓ Datang
+                                    </button>
+                                </>
+                            )}
+                            {booking.arrived && (
+                                <span className="text-[9px] font-bold bg-emerald-500 text-white px-1.5 py-0.5 rounded-full shadow-sm leading-none">
+                                    ✅ Hadir
+                                </span>
+                            )}
+                        </div>
+                    )}
                 </div>
             </Resizable>
         );
@@ -1173,7 +1210,7 @@ export function TimelineStudio() {
                             onMouseDownCapture={(e) => handleContainerMouseDown(e)}
                             onTouchStartCapture={(e) => handleContainerMouseDown(e)}
                         >
-                            <div className={`relative h-[100px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
+                            <div className={`relative h-[110px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
                                 {/* Background grid pattern */}
                                 <div className={`absolute inset-0 ${dm.gridPattern} pointer-events-none`}>
                                     <div className="absolute inset-0 bg-[linear-gradient(to_right,#000_1px,transparent_1px),linear-gradient(to_bottom,#000_1px,transparent_1px)] bg-[size:30px_30px]"></div>
