@@ -786,8 +786,9 @@ export function TimelineStudio() {
                 className={`booking-block group ${isDragging ? 'z-50' : selectedBookingIds.has(booking.id) ? 'z-40' : 'z-10'}`}
                 style={{ position: 'absolute', left: `${left}px`, bottom: '4px' }}
             >
+                {/* Main content area */}
                 <div
-                    className={`h-full w-full bg-gradient-to-br ${pkgColors.gradient} ${pkgColors.hover} rounded-lg ${isNarrow ? 'px-2 py-1.5' : 'px-3 py-2'} flex items-center justify-between border-2 ${pkgColors.border} shadow-lg transition-all duration-200 hover:shadow-xl relative overflow-hidden ${isDragging ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab'} ${booking.noShow ? 'opacity-50 grayscale' : ''} ${selectedBookingIds.has(booking.id) ? 'ring-4 ring-blue-500 ring-offset-2 border-blue-400' : ''}`}
+                    className={`flex-1 bg-gradient-to-br ${pkgColors.gradient} ${pkgColors.hover} rounded-t-lg ${isNarrow ? 'px-2 py-1.5' : 'px-3 py-1.5'} flex items-center justify-between border-x-2 border-t-2 ${pkgColors.border} shadow-lg transition-all duration-200 hover:shadow-xl relative overflow-hidden ${isDragging ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab'} ${booking.noShow ? 'opacity-50 grayscale' : ''} ${selectedBookingIds.has(booking.id) ? 'ring-4 ring-inset ring-blue-500 border-blue-400' : ''}`}
                     style={{
                         touchAction: 'none',
                         WebkitUserSelect: 'none',
@@ -803,7 +804,7 @@ export function TimelineStudio() {
                         if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('[class*="cursor-ew-resize"]')) {
                             return;
                         }
-                        const rect = e.currentTarget.getBoundingClientRect();
+                        const rect = (e.currentTarget.closest('.booking-block') as HTMLElement)?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
                         handleBookingMouseDown(e, booking.id, rect.left);
                     }}
                     onTouchStart={(e) => {
@@ -811,7 +812,7 @@ export function TimelineStudio() {
                         if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('[class*="cursor-ew-resize"]')) {
                             return;
                         }
-                        const rect = e.currentTarget.getBoundingClientRect();
+                        const rect = (e.currentTarget.closest('.booking-block') as HTMLElement)?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
                         handleBookingMouseDown(e, booking.id, rect.left);
                     }}
                     onClick={handleBlockClick}
@@ -834,7 +835,6 @@ export function TimelineStudio() {
                             <>
                                 <p className={`${textBase} text-[11px] font-bold truncate drop-shadow-sm leading-tight`}>{booking.customerName}</p>
                                 <p className={`${textSub} text-[10px] font-semibold drop-shadow-sm leading-tight mt-0.5`}>{timeStr}</p>
-                                <p className={`${textFaint} text-[9px] drop-shadow-sm leading-tight`}>{booking.duration}m</p>
                             </>
                         ) : (
                             <>
@@ -850,29 +850,30 @@ export function TimelineStudio() {
                             </>
                         )}
                     </div>
-
-                    {/* Arrived toggle button */}
-                    {!booking.noShow && (
-                        <div className="absolute bottom-1 right-1 z-20 pointer-events-auto">
-                            <button
-                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm leading-none transition-colors ${
-                                    booking.arrived
-                                        ? 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white'
-                                        : 'bg-amber-400 hover:bg-amber-500 active:bg-amber-600 text-amber-900'
-                                }`}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleArrived(booking.id);
-                                }}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onTouchStart={(e) => e.stopPropagation()}
-                                title={booking.arrived ? 'Tandai belum datang' : 'Tandai sudah datang'}
-                            >
-                                {booking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
-                            </button>
-                        </div>
-                    )}
                 </div>
+
+                {/* Integrated status strip at the bottom */}
+                {!booking.noShow && (
+                    <button
+                        className={`w-full h-[18px] flex items-center justify-center gap-1 text-[9px] font-bold rounded-b-lg border-x-2 border-b-2 transition-colors ${
+                            booking.arrived
+                                ? `${pkgColors.border} bg-emerald-500/80 hover:bg-emerald-500 text-white`
+                                : `${pkgColors.border} bg-amber-400/80 hover:bg-amber-400 text-amber-900`
+                        } ${selectedBookingIds.has(booking.id) ? 'border-blue-400' : ''}`}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            toggleArrived(booking.id);
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onTouchStart={(e) => e.stopPropagation()}
+                        title={booking.arrived ? 'Klik untuk tandai belum datang' : 'Klik untuk tandai sudah datang'}
+                    >
+                        {booking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
+                    </button>
+                )}
+                {booking.noShow && (
+                    <div className={`w-full h-[18px] rounded-b-lg border-x-2 border-b-2 ${pkgColors.border}`} />
+                )}
             </Resizable>
         );
     };
@@ -1459,12 +1460,28 @@ export function TimelineStudio() {
                                             <p className="text-xs sm:text-sm font-semibold text-gray-800">{timeStr} - {endTimeStr}</p>
                                         </div>
                                         <div className="bg-gray-50 rounded-lg p-2 sm:p-3 overflow-hidden">
-                                            <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Status</p>
-                                            <p className={`text-xs sm:text-sm font-semibold truncate ${selectedBooking.noShow ? 'text-red-600' : selectedBooking.arrived ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                                {selectedBooking.noShow ? '❌ Tidak Datang' : selectedBooking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
-                                            </p>
+                                            <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Durasi</p>
+                                            <p className="text-xs sm:text-sm font-semibold text-gray-800">{selectedBooking.duration} menit</p>
                                         </div>
                                     </div>
+
+                                    {/* Arrived toggle button in detail panel */}
+                                    {!selectedBooking.noShow && (
+                                        <button
+                                            className={`w-full h-10 flex items-center justify-center gap-2 text-sm font-bold rounded-xl border-2 transition-all duration-200 shadow-sm ${
+                                                selectedBooking.arrived
+                                                    ? 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white border-emerald-600'
+                                                    : 'bg-amber-400 hover:bg-amber-500 active:bg-amber-600 text-amber-900 border-amber-500'
+                                            }`}
+                                            onClick={() => {
+                                                toggleArrived(selectedBooking.id);
+                                                setSelectedBooking(prev => prev ? { ...prev, arrived: !prev.arrived } : null);
+                                            }}
+                                        >
+                                            {selectedBooking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
+                                            <span className="text-xs opacity-70 font-normal">(klik untuk ubah)</span>
+                                        </button>
+                                    )}
 
                                     {/* Action Buttons */}
                                     <div className="flex flex-col sm:flex-row gap-2">
