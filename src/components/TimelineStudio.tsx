@@ -42,7 +42,7 @@ const STUDIO_ATAS_TYPES = [
 ];
 
 const MINUTES_PER_HOUR = 60;
-const PIXEL_PER_MINUTE = 3;
+const PIXEL_PER_MINUTE = 4;
 const MIN_DURATION = 30;
 
 // Per-package colors for blocks
@@ -734,7 +734,6 @@ export function TimelineStudio() {
         const isDarkText = pkgColors.textDark === true;
         const textBase = isDarkText ? 'text-gray-800' : 'text-white';
         const textSub = isDarkText ? 'text-gray-600' : 'text-white/90';
-        const textFaint = isDarkText ? 'text-gray-500' : 'text-white/80';
 
         const timeStr = `${Math.floor(booking.startTime / 60).toString().padStart(2, '0')}:${(booking.startTime % 60).toString().padStart(2, '0')}`;
         const endTime = booking.startTime + booking.duration;
@@ -770,7 +769,7 @@ export function TimelineStudio() {
         return (
             <Resizable
                 key={booking.id}
-                size={{ width, height: 86 }}
+                size={{ width, height: 112 }}
                 minWidth={MIN_DURATION * PIXEL_PER_MINUTE}
                 enable={{ right: true }}
                 onResizeStop={(_e, _direction, _ref, d) => {
@@ -1203,7 +1202,7 @@ export function TimelineStudio() {
                             onMouseDownCapture={(e) => handleContainerMouseDown(e)}
                             onTouchStartCapture={(e) => handleContainerMouseDown(e)}
                         >
-                            <div className={`relative h-[110px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
+                            <div className={`relative h-[140px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
                                 {/* Background grid pattern */}
                                 <div className={`absolute inset-0 ${dm.gridPattern} pointer-events-none`}>
                                     <div className="absolute inset-0 bg-[linear-gradient(to_right,#000_1px,transparent_1px),linear-gradient(to_bottom,#000_1px,transparent_1px)] bg-[size:30px_30px]"></div>
@@ -1343,7 +1342,7 @@ export function TimelineStudio() {
                             onMouseDownCapture={(e) => handleContainerMouseDown(e)}
                             onTouchStartCapture={(e) => handleContainerMouseDown(e)}
                         >
-                            <div className={`relative h-[120px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
+                            <div className={`relative h-[140px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
                                 {/* Background grid pattern */}
                                 <div className={`absolute inset-0 ${dm.gridPattern} pointer-events-none`}>
                                     <div className="absolute inset-0 bg-[linear-gradient(to_right,#000_1px,transparent_1px),linear-gradient(to_bottom,#000_1px,transparent_1px)] bg-[size:30px_30px]"></div>
