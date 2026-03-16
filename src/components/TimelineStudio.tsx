@@ -769,7 +769,7 @@ export function TimelineStudio() {
         return (
             <Resizable
                 key={booking.id}
-                size={{ width, height: 112 }}
+                size={{ width, height: 108 }}
                 minWidth={MIN_DURATION * PIXEL_PER_MINUTE}
                 enable={{ right: true }}
                 onResizeStop={(_e, _direction, _ref, d) => {
@@ -783,7 +783,7 @@ export function TimelineStudio() {
                     )
                 }}
                 className={`booking-block group ${isDragging ? 'z-50' : selectedBookingIds.has(booking.id) ? 'z-40' : 'z-10'}`}
-                style={{ position: 'absolute', left: `${left}px`, bottom: '4px' }}
+                style={{ position: 'absolute', left: `${left}px`, top: '0px', bottom: '0px', height: '108px' }}
             >
                 {/* Main content area */}
                 <div
@@ -830,24 +830,15 @@ export function TimelineStudio() {
                     )}
 
                     <div className="flex-1 overflow-hidden relative z-10 pointer-events-none min-w-0">
-                        {isNarrow ? (
-                            <>
-                                <p className={`${textBase} text-[11px] font-bold truncate drop-shadow-sm leading-tight`}>{booking.customerName}</p>
-                                <p className={`${textSub} text-[10px] font-semibold drop-shadow-sm leading-tight mt-0.5`}>{timeStr}</p>
-                            </>
-                        ) : (
-                            <>
-                                <div className="flex items-center gap-1.5 mb-0.5">
-                                    <Move className={`w-3.5 h-3.5 ${textBase} opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0`} />
-                                    <User className={`w-3.5 h-3.5 ${textBase} flex-shrink-0`} />
-                                    <p className={`${textBase} text-sm font-bold truncate drop-shadow-sm`}>{booking.customerName}</p>
-                                </div>
-                                <p className={`${textBase} text-xs font-medium truncate drop-shadow-sm`}>{booking.bookingType}</p>
-                                <p className={`${textSub} text-[11px] font-semibold mt-0.5 drop-shadow-sm`}>
-                                    {timeStr} — {booking.duration} min
-                                </p>
-                            </>
-                        )}
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                            <Move className={`w-3.5 h-3.5 ${textBase} opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0`} />
+                            <User className={`w-3.5 h-3.5 ${textBase} flex-shrink-0`} />
+                            <p className={`${textBase} text-sm font-bold truncate drop-shadow-sm`}>{booking.customerName}</p>
+                        </div>
+                        <p className={`${textBase} text-xs font-medium truncate drop-shadow-sm`}>{booking.bookingType}</p>
+                        <p className={`${textSub} text-[11px] font-semibold mt-0.5 drop-shadow-sm`}>
+                            {timeStr} — {booking.duration} min
+                        </p>
                     </div>
                 </div>
 
