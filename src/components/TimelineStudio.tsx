@@ -390,9 +390,9 @@ export function TimelineStudio() {
         if (updatedBooking) setSelectedBooking(updatedBooking);
     };
 
-    const markArrived = (id: string) => {
+    const toggleArrived = (id: string) => {
         const updated = bookings.map(b =>
-            b.id === id ? { ...b, arrived: true } : b
+            b.id === id ? { ...b, arrived: !b.arrived } : b
         );
         updateBookings(updated);
     };
@@ -851,33 +851,25 @@ export function TimelineStudio() {
                         )}
                     </div>
 
-                    {/* Status badge + Datang button */}
+                    {/* Arrived toggle button */}
                     {!booking.noShow && (
-                        <div className="absolute bottom-1 right-1 flex items-center gap-1 z-20 pointer-events-auto">
-                            {!booking.arrived && (
-                                <>
-                                    <span className="text-[9px] font-bold bg-amber-400 text-amber-900 px-1.5 py-0.5 rounded-full shadow-sm leading-none">
-                                        ⏳ Belum
-                                    </span>
-                                    <button
-                                        className="text-[9px] font-bold bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white px-1.5 py-0.5 rounded-full shadow-sm leading-none transition-colors"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            markArrived(booking.id);
-                                        }}
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onTouchStart={(e) => e.stopPropagation()}
-                                        title="Tandai customer telah datang"
-                                    >
-                                        ✓ Datang
-                                    </button>
-                                </>
-                            )}
-                            {booking.arrived && (
-                                <span className="text-[9px] font-bold bg-emerald-500 text-white px-1.5 py-0.5 rounded-full shadow-sm leading-none">
-                                    ✅ Hadir
-                                </span>
-                            )}
+                        <div className="absolute bottom-1 right-1 z-20 pointer-events-auto">
+                            <button
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm leading-none transition-colors ${
+                                    booking.arrived
+                                        ? 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white'
+                                        : 'bg-amber-400 hover:bg-amber-500 active:bg-amber-600 text-amber-900'
+                                }`}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleArrived(booking.id);
+                                }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                title={booking.arrived ? 'Tandai belum datang' : 'Tandai sudah datang'}
+                            >
+                                {booking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
+                            </button>
                         </div>
                     )}
                 </div>
