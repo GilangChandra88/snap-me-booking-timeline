@@ -90,6 +90,8 @@ export function TimelineStudio() {
     const [transferPackage, setTransferPackage] = useState('');
     const [dropTransferPackages, setDropTransferPackages] = useState<Record<string, string>>({});
     const [undoHistory, setUndoHistory] = useState<Booking[][]>([]);
+    const [editPackageMode, setEditPackageMode] = useState(false);
+    const [editPackageValue, setEditPackageValue] = useState('');
 
     // Cross-studio Drag & Drop State
     const [dropTransferData, setDropTransferData] = useState<{
@@ -783,7 +785,7 @@ export function TimelineStudio() {
                     )
                 }}
                 className={`booking-block group ${isDragging ? 'z-50' : selectedBookingIds.has(booking.id) ? 'z-40' : 'z-10'}`}
-                style={{ position: 'absolute', left: `${left}px`, top: '0px', bottom: '0px', height: '108px' }}
+                style={{ position: 'absolute', left: `${left}px`, top: '28px', bottom: '4px', height: '108px' }}
             >
                 {/* Main content area */}
                 <div
@@ -1443,7 +1445,41 @@ export function TimelineStudio() {
                                         </div>
                                         <div className="bg-gray-50 rounded-lg p-2 sm:p-3 overflow-hidden">
                                             <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Paket</p>
-                                            <p className="text-xs sm:text-sm font-semibold text-gray-800 truncate">{selectedBooking.bookingType}</p>
+                                            <div className="flex items-center justify-between gap-1">
+                                                {editPackageMode ? (
+                                                    <Select
+                                                        value={editPackageValue}
+                                                        onValueChange={(val) => {
+                                                            setEditPackageValue(val);
+                                                            const updated = bookings.map(b =>
+                                                                b.id === selectedBooking.id ? { ...b, bookingType: val } : b
+                                                            );
+                                                            updateBookings(updated);
+                                                            setSelectedBooking(prev => prev ? { ...prev, bookingType: val } : null);
+                                                            setEditPackageMode(false);
+                                                        }}
+                                                    >
+                                                        <SelectTrigger className="h-7 text-xs">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {(selectedBooking.studioType === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES).map(type => (
+                                                                <SelectItem key={type} value={type}>{type}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <>
+                                                        <p className="text-xs sm:text-sm font-semibold text-gray-800 truncate">{selectedBooking.bookingType}</p>
+                                                        <button
+                                                            className="text-[10px] text-blue-500 hover:text-blue-700 font-medium flex-shrink-0"
+                                                            onClick={() => { setEditPackageMode(true); setEditPackageValue(selectedBooking.bookingType); }}
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="bg-gray-50 rounded-lg p-2 sm:p-3">
                                             <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Waktu</p>
@@ -1487,7 +1523,15 @@ export function TimelineStudio() {
                                         <Button
                                             variant="outline"
                                             className="flex-1 text-xs sm:text-sm h-9 sm:h-10"
-                                            onClick={() => { setTransferMode(!transferMode); setTransferPackage(''); }}
+                                            onClick={() => {
+                                                const samePackageExists = destTypes.includes(selectedBooking.bookingType);
+                                                if (samePackageExists) {
+                                                    transferStudio(selectedBooking.id, selectedBooking.bookingType);
+                                                } else {
+                                                    setTransferMode(!transferMode);
+                                                    setTransferPackage('');
+                                                }
+                                            }}
                                         >
                                             <ArrowRightLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
                                             Pindah Studio
