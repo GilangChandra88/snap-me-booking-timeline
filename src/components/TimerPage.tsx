@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { database } from '../lib/firebase';
 import { ref, onValue } from 'firebase/database';
-import { Clock, Camera } from 'lucide-react';
+import { Clock, Camera, Volume2, VolumeX } from 'lucide-react';
+import { playStartSound, playEndSound, initAudioContext } from '../lib/audio';
 
 interface Booking {
     id: string;
@@ -12,6 +13,7 @@ interface Booking {
     startTime: number;
     duration: number;
     noShow?: boolean;
+    arrived?: boolean;
 }
 
 const getLocalYMD = (d: Date) => {
@@ -38,6 +40,10 @@ export function TimerPage() {
     const [allBookings, setAllBookings] = useState<Booking[]>([]);
     const [currentTime, setCurrentTime] = useState(new Date());
 
+    const [audioEnabled, setAudioEnabled] = useState(false);
+    const playedStartSoundRef = useRef<Set<string>>(new Set());
+    const playedEndSoundRef = useRef<Set<string>>(new Set());
+
     const darkMode = typeof window !== 'undefined' ? localStorage.getItem('snapme-dark') === 'true' : false;
 
     const dm = {
@@ -50,13 +56,56 @@ export function TimerPage() {
         headerBg: darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200',
     };
 
+    const handleEnableAudio = async () => {
+        try {
+            await initAudioContext();
+            setAudioEnabled(true);
+        } catch (err) {
+            console.error("Failed to init audio", err);
+        }
+    };
+
     // Update current time every second
     useEffect(() => {
         const timer = setInterval(() => {
-            setCurrentTime(new Date());
+            const now = new Date();
+            setCurrentTime(now);
+            
+            // Check for sounds if audio is enabled
+            if (audioEnabled) {
+                const nowInSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+                const todayStr = getLocalYMD(now);
+
+                allBookings.forEach(booking => {
+                    if (booking.noShow) return;
+                    if (!booking.arrived) return;
+                    if ((booking.date || todayStr) !== todayStr) return;
+
+                    const startMins = booking.startTime;
+                    const durationMins = booking.duration;
+                    const startSecs = startMins * 60;
+                    const endSecs = (startMins + durationMins) * 60;
+
+                    // Play start sound if we are within the first 5 seconds of the booking
+                    if (nowInSeconds >= startSecs && nowInSeconds <= startSecs + 5) {
+                        if (!playedStartSoundRef.current.has(booking.id)) {
+                            playedStartSoundRef.current.add(booking.id);
+                            playStartSound();
+                        }
+                    }
+
+                    // Play end sound if we just passed the end time (within 5 seconds)
+                    if (nowInSeconds >= endSecs && nowInSeconds <= endSecs + 5) {
+                        if (!playedEndSoundRef.current.has(booking.id)) {
+                            playedEndSoundRef.current.add(booking.id);
+                            playEndSound();
+                        }
+                    }
+                });
+            }
         }, 1000);
         return () => clearInterval(timer);
-    }, []);
+    }, [allBookings, audioEnabled]);
 
     // Listen to Firebase for real-time updates
     useEffect(() => {
@@ -159,15 +208,34 @@ export function TimerPage() {
                         Live Timer
                     </h1>
                 </div>
-                <div className="text-right">
-                    <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 font-medium">
-                        {currentTime.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                    </p>
-                    <p className="text-lg sm:text-xl font-bold text-gray-800 dark:text-gray-200 tabular-nums">
-                        {currentTime.getHours().toString().padStart(2, '0')}:
-                        {currentTime.getMinutes().toString().padStart(2, '0')}:
-                        {currentTime.getSeconds().toString().padStart(2, '0')}
-                    </p>
+
+                {/* Audio Controls */}
+                <div className="flex items-center gap-4">
+                    {!audioEnabled ? (
+                        <button
+                            onClick={handleEnableAudio}
+                            className="flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-100/50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-lg text-sm font-semibold transition-colors border border-purple-200 dark:border-purple-800 animate-pulse"
+                        >
+                            <VolumeX className="w-4 h-4" />
+                            <span className="hidden sm:inline">Aktifkan Suara</span>
+                        </button>
+                    ) : (
+                        <div className="flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-green-100/50 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm font-semibold border border-green-200 dark:border-green-800">
+                            <Volume2 className="w-4 h-4" />
+                            <span className="hidden sm:inline">Suara Aktif</span>
+                        </div>
+                    )}
+
+                    <div className="text-right border-l border-gray-200 dark:border-gray-800 pl-4">
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 font-medium">
+                            {currentTime.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                        </p>
+                        <p className="text-lg sm:text-xl font-bold text-gray-800 dark:text-gray-200 tabular-nums">
+                            {currentTime.getHours().toString().padStart(2, '0')}:
+                            {currentTime.getMinutes().toString().padStart(2, '0')}:
+                            {currentTime.getSeconds().toString().padStart(2, '0')}
+                        </p>
+                    </div>
                 </div>
             </div>
 
