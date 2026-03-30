@@ -1,26 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { database } from '../lib/firebase';
-import { ref, onValue } from 'firebase/database';
+import { db } from '../lib/firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { Clock, Camera, Volume2, VolumeX } from 'lucide-react';
 import { playStartSound, playEndSound, initAudioContext } from '../lib/audio';
+import type { Booking } from './TimelineStudio';
+import { getLocalYMD } from './TimelineStudio';
 
-interface Booking {
-    id: string;
-    date?: string;
-    studioType: 'bawah' | 'atas';
-    bookingType: string;
-    customerName: string;
-    startTime: number;
-    duration: number;
-    noShow?: boolean;
-    arrived?: boolean;
-}
-
-const getLocalYMD = (d: Date) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+const isTodayNoShow = (booking: Booking, now: Date) => {
+    const todayStr = getLocalYMD(now);
+    const bDate = booking.date || todayStr;
+    if (bDate !== todayStr) return false;
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    return nowMinutes > booking.startTime + booking.duration && !booking.arrived;
 };
 
 // Per-package colors for blocks
@@ -77,7 +68,7 @@ export function TimerPage() {
                 const todayStr = getLocalYMD(now);
 
                 allBookings.forEach(booking => {
-                    if (booking.noShow) return;
+                    if (isTodayNoShow(booking, now)) return;
                     if (!booking.arrived) return;
                     if ((booking.date || todayStr) !== todayStr) return;
 
@@ -109,14 +100,12 @@ export function TimerPage() {
 
     // Listen to Firebase for real-time updates
     useEffect(() => {
-        const bookingsDbRef = ref(database, 'bookings');
-        const unsubscribe = onValue(bookingsDbRef, (snapshot) => {
-            const data = snapshot.val();
-            if (data) {
-                setAllBookings(Object.values(data));
-            } else {
-                setAllBookings([]);
-            }
+        const unsubscribe = onSnapshot(collection(db, 'bookings'), (snapshot) => {
+            const list: Booking[] = [];
+            snapshot.forEach((docSnap) => {
+                list.push(docSnap.data() as Booking);
+            });
+            setAllBookings(list);
         });
         return () => unsubscribe();
     }, []);
@@ -125,7 +114,7 @@ export function TimerPage() {
     const todayStr = getLocalYMD(new Date());
 
     const activeBookings = allBookings.filter(booking => {
-        if (booking.noShow) return false;
+        if (isTodayNoShow(booking, new Date())) return false;
         if (!booking.arrived) return false;
         if ((booking.date || todayStr) !== todayStr) return false;
 
@@ -242,27 +231,6 @@ export function TimerPage() {
             <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 min-h-full">
 
-                    {/* Kolom Studio Bawah */}
-                    <div className="flex flex-col h-full bg-white/50 dark:bg-gray-900/50 rounded-3xl p-4 sm:p-6 border-2 border-purple-100 dark:border-purple-900/30">
-                        <div className="flex items-center gap-3 mb-6 shrink-0">
-                            <div className="p-2 sm:p-3 bg-purple-100 dark:bg-purple-900/50 rounded-xl">
-                                <Camera className="w-6 h-6 sm:w-8 sm:h-8 text-purple-700 dark:text-purple-400" />
-                            </div>
-                            <h2 className={`text-xl sm:text-3xl font-black ${dm.studioTitle} uppercase tracking-wider`}>Studio Bawah</h2>
-                        </div>
-
-                        <div className="flex-1 flex flex-col gap-4 sm:gap-6 overflow-y-auto">
-                            {activeBawah.length > 0 ? (
-                                activeBawah.map(b => renderTimerCard(b, 'text-purple-600 dark:text-purple-400'))
-                            ) : (
-                                <div className={`flex flex-col items-center justify-center h-full min-h-[200px] ${dm.emptyText} border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-2xl`}>
-                                    <Clock className="w-16 h-16 sm:w-20 sm:h-20 mb-4 opacity-20" />
-                                    <p className="text-lg sm:text-xl font-medium text-center">Tidak ada booking aktif</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
                     {/* Kolom Studio Atas */}
                     <div className="flex flex-col h-full bg-white/50 dark:bg-gray-900/50 rounded-3xl p-4 sm:p-6 border-2 border-cyan-100 dark:border-cyan-900/30">
                         <div className="flex items-center gap-3 mb-6 shrink-0">
@@ -275,6 +243,27 @@ export function TimerPage() {
                         <div className="flex-1 flex flex-col gap-4 sm:gap-6 overflow-y-auto">
                             {activeAtas.length > 0 ? (
                                 activeAtas.map(b => renderTimerCard(b, 'text-cyan-600 dark:text-cyan-400'))
+                            ) : (
+                                <div className={`flex flex-col items-center justify-center h-full min-h-[200px] ${dm.emptyText} border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-2xl`}>
+                                    <Clock className="w-16 h-16 sm:w-20 sm:h-20 mb-4 opacity-20" />
+                                    <p className="text-lg sm:text-xl font-medium text-center">Tidak ada booking aktif</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Kolom Studio Bawah */}
+                    <div className="flex flex-col h-full bg-white/50 dark:bg-gray-900/50 rounded-3xl p-4 sm:p-6 border-2 border-purple-100 dark:border-purple-900/30">
+                        <div className="flex items-center gap-3 mb-6 shrink-0">
+                            <div className="p-2 sm:p-3 bg-purple-100 dark:bg-purple-900/50 rounded-xl">
+                                <Camera className="w-6 h-6 sm:w-8 sm:h-8 text-purple-700 dark:text-purple-400" />
+                            </div>
+                            <h2 className={`text-xl sm:text-3xl font-black ${dm.studioTitle} uppercase tracking-wider`}>Studio Bawah</h2>
+                        </div>
+
+                        <div className="flex-1 flex flex-col gap-4 sm:gap-6 overflow-y-auto">
+                            {activeBawah.length > 0 ? (
+                                activeBawah.map(b => renderTimerCard(b, 'text-purple-600 dark:text-purple-400'))
                             ) : (
                                 <div className={`flex flex-col items-center justify-center h-full min-h-[200px] ${dm.emptyText} border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-2xl`}>
                                     <Clock className="w-16 h-16 sm:w-20 sm:h-20 mb-4 opacity-20" />

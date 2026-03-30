@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Resizable } from 're-resizable';
-import { Plus, X, GripVertical, Clock, User, Camera, ChevronLeft, ChevronRight, Move, ArrowRightLeft, Play, Undo2, UserX, Moon, Sun, Trash2 } from 'lucide-react';
+import { Plus, X, GripVertical, Clock, User, Camera, ChevronLeft, ChevronRight, Move, ArrowRightLeft, Play, Undo2, Moon, Sun, Trash2, Link2, Unlink2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { database } from '../lib/firebase';
-import { ref, set, onValue } from 'firebase/database';
+import { db } from '../lib/firebase';
+import { collection, onSnapshot, writeBatch, doc } from 'firebase/firestore';
+import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
+import type { AppSettings } from './SettingsPage';
+import { normalizePhoneNumber } from '../lib/utils';
 
 export interface Booking {
     id: string;
@@ -15,10 +18,17 @@ export interface Booking {
     studioType: 'bawah' | 'atas';
     bookingType: string;
     customerName: string;
+    customerPhone?: string; // WhatsApp number (digits only, e.g. 6285...)
     startTime: number; // minutes from midnight
     duration: number; // minutes
-    noShow?: boolean;
     arrived?: boolean; // true when 'Mulai Sekarang' is clicked
+    invoiceId?: string; // set when nota is created in Kasir
+    driveLink?: string; // set when Google Drive folder is generated
+    driveFolderId?: string; // set when Google Drive folder is generated
+    groupId?: string; // set when multiple bookings are linked together
+    isTransactionFinished?: boolean; // set when Kasir completely finished the workflow
+    waSent?: boolean; // true when Drive link WA message has been sent
+    reviewSent?: boolean; // true when review/masukan WA message has been sent
 }
 
 export const getLocalYMD = (d: Date) => {
@@ -71,6 +81,201 @@ const STUDIO_COLORS = {
     }
 };
 
+function GoogleDriveUploader({ 
+    booking, 
+    bookings, 
+    updateBookings, 
+    setSelectedBooking,
+    appSettings,
+    googleToken,
+    setGoogleToken
+}: { 
+    booking: Booking;
+    bookings: Booking[];
+    updateBookings: (b: Booking[]) => void;
+    setSelectedBooking: React.Dispatch<React.SetStateAction<Booking | null>>;
+    appSettings: AppSettings;
+    googleToken: string | null;
+    setGoogleToken: (token: string | null) => void;
+}) {
+    const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+
+    const loginGoogle = useGoogleLogin({
+        onSuccess: (codeResponse) => setGoogleToken(codeResponse.access_token),
+        onError: (error) => console.log('Login Failed:', error),
+        scope: 'https://www.googleapis.com/auth/drive'
+    });
+
+    const handleCreateDriveFolder = async () => {
+        if (!googleToken || !appSettings.googleDriveFolderId) {
+            alert('Pastikan Anda sudah Login Google dan Master Folder ID sudah diatur di Settings.');
+            return;
+        }
+
+        const masterFolderId = appSettings.googleDriveFolderId.trim();
+
+        setIsCreatingFolder(true);
+        try {
+            const folderName = `${booking.customerName} - ${getLocalYMD(new Date())}`;
+            const metadata = {
+                name: folderName,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [masterFolderId]
+            };
+
+            const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${googleToken}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(metadata)
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                console.error("API Error Response:", errData);
+                if (response.status === 401) {
+                    setGoogleToken(null);
+                    throw new Error('Sesi login Google telah berakhir. Silakan klik "Login Google" kembali.');
+                }
+                throw new Error(errData?.error?.message || 'Gagal membuat folder di Google Drive. Periksa Token/Folder ID.');
+            }
+
+            const data = await response.json();
+            const folderId = data.id;
+
+            const linkResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=webViewLink`, {
+                method: 'GET',
+                headers: {
+                    Authorization: `Bearer ${googleToken}`,
+                }
+            });
+            const linkData = await linkResponse.json();
+            
+            // Save link to Firestore persistently
+            const batch = writeBatch(db);
+            batch.update(doc(db, 'bookings', booking.id), { 
+                driveLink: linkData.webViewLink,
+                driveFolderId: folderId
+            });
+            await batch.commit();
+
+            const updatedBookings = bookings.map(b => b.id === booking.id ? { 
+                ...b, 
+                driveLink: linkData.webViewLink,
+                driveFolderId: folderId
+            } : b);
+            updateBookings(updatedBookings);
+            setSelectedBooking(prev => prev ? { 
+                ...prev, 
+                driveLink: linkData.webViewLink,
+                driveFolderId: folderId
+            } : null);
+            alert(`Folder berhasil dibuat untuk ${booking.customerName}!`);
+
+        } catch (error) {
+            console.error(error);
+            alert('Gagal membuat folder: ' + String(error));
+        } finally {
+            setIsCreatingFolder(false);
+        }
+    };
+
+    return (
+        <div className="bg-blue-50/50 rounded-lg p-3 border border-blue-100 mt-3">
+            <div className="flex justify-between items-center mb-2">
+                <p className="text-[11px] text-blue-800 uppercase font-bold flex items-center gap-1">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-cloud"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+                    Materi Google Drive
+                </p>
+                {!googleToken && (
+                    <Button variant="outline" size="sm" className="h-7 text-[10px] bg-white text-blue-600 border-blue-200 hover:bg-blue-50" onClick={() => loginGoogle()}>
+                        Login Google
+                    </Button>
+                )}
+            </div>
+
+            {booking.driveLink ? (
+                <div className="space-y-2">
+                    <Button 
+                        className="w-full text-xs h-8 bg-white border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800 flex justify-start items-center" 
+                        variant="outline"
+                        onClick={() => window.open(booking.driveLink, '_blank')}
+                    >
+                        <ArrowRightLeft className="w-3 h-3 mr-2 text-blue-500" />
+                        Buka Folder Drive Materi
+                    </Button>
+                    <div className="flex gap-2">
+                        <Button
+                            className="flex-1 text-xs h-8 bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+                            variant="outline"
+                            onClick={() => {
+                                const caption = `Hallo kak, ini hasil fotonya ya 🙌✨\n${booking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
+                                navigator.clipboard.writeText(caption);
+                                alert('Caption + Link Drive berhasil disalin!');
+                            }}
+                        >
+                            📋 Salin Link + Caption
+                        </Button>
+                    </div>
+                    {booking.customerPhone && (
+                        <div className="space-y-2 mt-2">
+                            <Button
+                                className={`w-full text-xs h-8 ${booking.waSent ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-default' : 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100 hover:text-green-800'}`}
+                                variant="outline"
+                                onClick={() => {
+                                    const caption = `Hallo kak, ini hasil fotonya ya 🙌✨\n${booking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
+                                    let waPhone = (booking.customerPhone || '').replace(/\D/g, '');
+                                    if (waPhone.startsWith('0')) waPhone = '62' + waPhone.substring(1);
+                                    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(caption)}`, '_blank');
+                                    // Mark as sent
+                                    const batch = writeBatch(db);
+                                    batch.update(doc(db, 'bookings', booking.id), { waSent: true });
+                                    batch.commit();
+                                    const updated = bookings.map(b => b.id === booking.id ? { ...b, waSent: true } : b);
+                                    updateBookings(updated);
+                                    setSelectedBooking(prev => prev ? { ...prev, waSent: true } : null);
+                                }}
+                            >
+                                {booking.waSent ? '✅ WA Materi Terkirim' : '💬 Kirim via WA'}
+                            </Button>
+                            <Button
+                                className={`w-full text-xs h-8 ${booking.reviewSent ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-default' : 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100 hover:text-green-800'}`}
+                                variant="outline"
+                                onClick={() => {
+                                    let waPhone = (booking.customerPhone || '').replace(/\D/g, '');
+                                    if (waPhone.startsWith('0')) waPhone = '62' + waPhone.substring(1);
+                                    const message = `https://g.page/r/CaIIjtk0smLtEBM/review\n\nTerimakasih sudah foto di Snapme_singaraja ya kak✨🤩\n\nKami Dari Snapme Singaraja ingin meminta ulasan terkait pelayanan  dan hasil foto kami kepada Customer. Untuk itu mohon bantuannya klik link di atas\nDan berikan kritikan/saran terkait pelayanan kami, Agar bisa lebih baik kedepannya ya kak terimakasih 🥰🙏🏻`;
+                                    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank');
+                                    // Mark as sent
+                                    const batch = writeBatch(db);
+                                    batch.update(doc(db, 'bookings', booking.id), { reviewSent: true });
+                                    batch.commit();
+                                    const updated = bookings.map(b => b.id === booking.id ? { ...b, reviewSent: true } : b);
+                                    updateBookings(updated);
+                                    setSelectedBooking(prev => prev ? { ...prev, reviewSent: true } : null);
+                                }}
+                            >
+                                {booking.reviewSent ? '✅ Masukan Terkirim' : '⭐ Kirim Masukan'}
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            ) : (
+                <Button 
+                    disabled={!googleToken || isCreatingFolder}
+                    onClick={handleCreateDriveFolder}
+                    className="w-full h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                    {isCreatingFolder ? 'Membuat Folder...' : 'Buat Folder Baru di Drive'}
+                </Button>
+            )}
+            
+        </div>
+    );
+}
+
 export function TimelineStudio() {
     const [allBookings, setAllBookings] = useState<Booking[]>([]);
     const [selectedDate] = useState(() => getLocalYMD(new Date()));
@@ -90,8 +295,6 @@ export function TimelineStudio() {
     const [transferPackage, setTransferPackage] = useState('');
     const [dropTransferPackages, setDropTransferPackages] = useState<Record<string, string>>({});
     const [undoHistory, setUndoHistory] = useState<Booking[][]>([]);
-    const [editPackageMode, setEditPackageMode] = useState(false);
-    const [editPackageValue, setEditPackageValue] = useState('');
 
     // Cross-studio Drag & Drop State
     const [dropTransferData, setDropTransferData] = useState<{
@@ -99,6 +302,7 @@ export function TimelineStudio() {
         targetStudio: 'bawah' | 'atas',
         updatedSimulatedBookings: Booking[]
     } | null>(null);
+    const [dropTransferOriginalBookings, setDropTransferOriginalBookings] = useState<Booking[] | null>(null);
 
     // Keep selectedBooking updated if its data changes
     useEffect(() => {
@@ -137,9 +341,31 @@ export function TimelineStudio() {
     const longPressFiredRef = useRef(false);
     const dropZoneRef = useRef<'bawah' | 'atas' | null>(null);
 
+    // Google Drive States
+    const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+    const [googleToken, setGoogleTokenState] = useState<string | null>(() => sessionStorage.getItem('googleToken'));
+
+    const setGoogleToken = (token: string | null) => {
+        setGoogleTokenState(token);
+        if (token) {
+            sessionStorage.setItem('googleToken', token);
+        } else {
+            sessionStorage.removeItem('googleToken');
+        }
+    };
+
+    // Fetch Settings
+    useEffect(() => {
+        const unsub = onSnapshot(doc(db, 'settings', 'appSettings'), (snap) => {
+            setAppSettings(snap.data() as AppSettings);
+        });
+        return () => unsub();
+    }, []);
+
     // Form state
     const [formData, setFormData] = useState({
         customerName: '',
+        customerPhone: '',
         bookingType: '',
         startHour: '09',
         startMinute: '00',
@@ -155,32 +381,48 @@ export function TimelineStudio() {
 
     // Firebase: Listen for real-time updates
     useEffect(() => {
-        const bookingsDbRef = ref(database, 'bookings');
-        const unsubscribe = onValue(bookingsDbRef, (snapshot) => {
+        const unsubscribe = onSnapshot(collection(db, 'bookings'), (snapshot) => {
             if (firebaseWriteRef.current) {
                 firebaseWriteRef.current = false;
                 return;
             }
-            const data = snapshot.val();
-            if (data) {
-                const loadedBookings: Booking[] = Object.values(data);
-                setAllBookings(loadedBookings);
-                allBookingsRef.current = loadedBookings;
-            } else {
-                setAllBookings([]);
-                allBookingsRef.current = [];
-            }
+            const loadedBookings: Booking[] = [];
+            snapshot.forEach(docSnap => {
+                loadedBookings.push(docSnap.data() as Booking);
+            });
+            
+            setAllBookings(loadedBookings);
+            allBookingsRef.current = loadedBookings;
         });
         return () => unsubscribe();
     }, []);
 
     // Save ALL bookings to Firebase
-    const saveToFirebase = useCallback((newBookings: Booking[]) => {
+    const saveToFirebase = useCallback(async (newBookings: Booking[], oldBookings: Booking[]) => {
         firebaseWriteRef.current = true;
-        const bookingsDbRef = ref(database, 'bookings');
-        const bookingsMap: Record<string, Booking> = {};
-        newBookings.forEach(b => { bookingsMap[b.id] = b; });
-        set(bookingsDbRef, bookingsMap);
+        
+        try {
+            const batch = writeBatch(db);
+            
+            const currentIds = new Set(oldBookings.map(b => b.id));
+            const newIds = new Set(newBookings.map(b => b.id));
+            
+            for (const id of currentIds) {
+                if (!newIds.has(id)) {
+                    batch.delete(doc(db, 'bookings', id));
+                }
+            }
+            
+            newBookings.forEach(b => {
+                const sanitizedBooking = JSON.parse(JSON.stringify(b));
+                batch.set(doc(db, 'bookings', b.id), sanitizedBooking);
+            });
+            
+            await batch.commit();
+        } catch (e) {
+            console.error(e);
+            alert("Gagal sinkronisasi data dengan server: " + String(e));
+        }
     }, []);
 
     // Update only current date's bookings without Firebase save (for dragging)
@@ -194,11 +436,12 @@ export function TimelineStudio() {
 
     // Update bookings for current date + save to Firebase + (optional) undo
     const updateBookings = useCallback((newFiltered: Booking[], skipUndo = false) => {
+        const oldAllBookings = [...allBookingsRef.current];
         if (!skipUndo) {
-            setUndoHistory(prev => [...prev.slice(-20), allBookingsRef.current]);
+            setUndoHistory(prev => [...prev.slice(-20), oldAllBookings]);
         }
         setFilteredBookings(newFiltered);
-        saveToFirebase(allBookingsRef.current);
+        saveToFirebase(allBookingsRef.current, oldAllBookings);
     }, [setFilteredBookings, saveToFirebase]);
 
     // Undo function
@@ -207,9 +450,10 @@ export function TimelineStudio() {
             if (prev.length === 0) return prev;
             const newHistory = [...prev];
             const previousState = newHistory.pop()!;
+            const oldAllBookings = [...allBookingsRef.current];
             setAllBookings(previousState);
             allBookingsRef.current = previousState;
-            saveToFirebase(previousState);
+            saveToFirebase(previousState, oldAllBookings);
             return newHistory;
         });
     }, [saveToFirebase]);
@@ -326,13 +570,14 @@ export function TimelineStudio() {
             studioType: selectedStudio,
             bookingType: formData.bookingType,
             customerName: formData.customerName,
+            ...(formData.customerPhone.trim() ? { customerPhone: normalizePhoneNumber(formData.customerPhone) } : {}),
             startTime,
             duration: MIN_DURATION,
         };
 
         const updated = resolveCollisions([...bookings, newBooking], new Set([newBooking.id]));
         updateBookings(updated);
-        setFormData({ customerName: '', bookingType: '', startHour: '09', startMinute: '00' });
+        setFormData({ customerName: '', customerPhone: '', bookingType: '', startHour: '09', startMinute: '00' });
         setIsAddDialogOpen(false);
     };
 
@@ -372,6 +617,15 @@ export function TimelineStudio() {
         alarmPlayedRef.current.delete(id);
     };
 
+    const updateBookingPackage = (id: string, newPackage: string) => {
+        const updated = bookings.map(b =>
+            b.id === id ? { ...b, bookingType: newPackage } : b
+        );
+        updateBookings(updated);
+        const updatedBooking = updated.find(b => b.id === id);
+        if (updatedBooking) setSelectedBooking(updatedBooking);
+    };
+
     const moveToCurrentTime = (id: string) => {
         const now = currentTimeInMinutes;
         const updated = bookings.map(b => b.id === id ? { ...b, startTime: now, arrived: true } : b);
@@ -383,15 +637,6 @@ export function TimelineStudio() {
         }
     };
 
-    const toggleNoShow = (id: string) => {
-        const updated = bookings.map(b =>
-            b.id === id ? { ...b, noShow: !b.noShow } : b
-        );
-        updateBookings(updated);
-        const updatedBooking = updated.find(b => b.id === id);
-        if (updatedBooking) setSelectedBooking(updatedBooking);
-    };
-
     const toggleArrived = (id: string) => {
         const updated = bookings.map(b =>
             b.id === id ? { ...b, arrived: !b.arrived } : b
@@ -399,12 +644,45 @@ export function TimelineStudio() {
         updateBookings(updated);
     };
 
-    const transferStudio = (id: string, newPackage: string) => {
+    const linkSelectedBookings = () => {
+        if (selectedBookingIds.size < 2) return;
+        const selectedBookingsArray = bookings.filter(b => selectedBookingIds.has(b.id));
+        let existingGroupId = selectedBookingsArray.find(b => b.groupId)?.groupId;
+        
+        // Use an existing group if one booking is already grouped, else create new
+        const newGroupId = existingGroupId || (Date.now().toString(36) + Math.random().toString(36).substring(2));
+        
+        const updated = bookings.map(b => 
+            selectedBookingIds.has(b.id) ? { ...b, groupId: newGroupId } : b
+        );
+        updateBookings(updated);
+        setSelectedBookingIds(new Set());
+    };
+
+    const unlinkBooking = (id: string) => {
+        const updated = bookings.map(b => b.id === id ? { ...b, groupId: undefined } : b);
+        updateBookings(updated);
+        setSelectedBooking(prev => prev && prev.id === id ? { ...prev, groupId: undefined } : prev);
+    };
+
+    const transferStudio = (id: string, newPackage?: string) => {
         const booking = bookings.find(b => b.id === id);
         if (!booking) return;
         const newStudio: 'bawah' | 'atas' = booking.studioType === 'bawah' ? 'atas' : 'bawah';
+
+        let finalPackage = newPackage;
+        // Jika paketnya Basic Putih dan tersedia di kedua studio, langsung pakai paket yang sama tanpa konfirmasi
+        if (!finalPackage && booking.bookingType === 'Basic Putih') {
+            const targetTypes = newStudio === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES;
+            if (targetTypes.includes('Basic Putih')) {
+                finalPackage = booking.bookingType;
+            }
+        }
+
+        if (!finalPackage) return;
+
         const updated = bookings.map(b =>
-            b.id === id ? { ...b, studioType: newStudio, bookingType: newPackage } : b
+            b.id === id ? { ...b, studioType: newStudio, bookingType: finalPackage! } : b
         );
         updateBookings(resolveCollisions(updated, new Set([id])));
         setSelectedBooking(null);
@@ -452,6 +730,8 @@ export function TimelineStudio() {
         });
     }, [currentTimeInMinutes, bookings]);
 
+    // Tidak ada status tersimpan lain selain arrived (tidak datang dihitung dari waktu + arrived)
+
     const updateBookingDuration = (id: string, newWidth: number) => {
         const newDuration = Math.max(MIN_DURATION, Math.round(newWidth / PIXEL_PER_MINUTE));
         const updated = bookings.map(b => b.id === id ? { ...b, duration: newDuration } : b);
@@ -481,12 +761,16 @@ export function TimelineStudio() {
         setDropTransferData(null);
         setDropTransferPackages({});
         setSelectedBookingIds(new Set());
+        setDropTransferOriginalBookings(null);
     };
 
     const cancelDropTransfer = () => {
         setDropTransferData(null);
         setDropTransferPackages({});
-        setFilteredBookings(allBookingsRef.current); // Revert UI
+        if (dropTransferOriginalBookings) {
+            setFilteredBookings(dropTransferOriginalBookings);
+        }
+        setDropTransferOriginalBookings(null);
     };
 
     const handleBookingMouseDown = (e: React.MouseEvent | React.TouchEvent, bookingId: string, currentLeft: number) => {
@@ -570,11 +854,18 @@ export function TimelineStudio() {
                 // Move all selected items if the dragging item is selected, otherwise just move the dragging item
                 const movedIds = selectedBookingIds.has(draggedBooking.id) ? selectedBookingIds : new Set([draggedBooking.id]);
 
+                const isCrossStudio = !!dropZoneRef.current;
+                const draggedStudio = booking.studioType;
+
                 // Always recalculate from the ORIGINAL snapshot, not from the current (already-pushed) state
                 const updated = dragOriginalBookingsRef.current.map((b: Booking) => {
                     if (movedIds.has(b.id)) {
                         const newTime = Math.max(0, Math.min(b.startTime + timeDelta, 24 * 60 - b.duration));
-                        return { ...b, startTime: newTime, studioType: targetStudio };
+                        // Jika hanya geser waktu, jangan ubah studio booking lain (terutama yang beda timeline)
+                        // Jika cross-studio, hanya booking yang berasal dari studio yang sama dengan yang di-drag yang ikut pindah
+                        const nextStudioType =
+                            isCrossStudio && b.studioType === draggedStudio ? targetStudio : b.studioType;
+                        return { ...b, startTime: newTime, studioType: nextStudioType };
                     }
                     return b;
                 });
@@ -592,21 +883,52 @@ export function TimelineStudio() {
 
             if (wasDraggingRef.current) {
                 if (dropZoneRef.current) {
-                    // Trigger transfer dialog
-                    const movedIdsArray = Array.from(selectedBookingIds.has(draggedBooking?.id || '') ? selectedBookingIds : new Set([draggedBooking!.id]));
-                    setDropTransferData({
-                        bookingIds: movedIdsArray,
-                        targetStudio: dropZoneRef.current,
-                        updatedSimulatedBookings: allBookingsRef.current // The visually updated state
-                    });
+                    const targetStudio = dropZoneRef.current;
+                    const movedIdsArray = Array.from(
+                        selectedBookingIds.has(draggedBooking?.id || '')
+                            ? selectedBookingIds
+                            : new Set([draggedBooking!.id])
+                    );
 
-                    // Pre-fill empty selections if available
-                    const initialAcc: Record<string, string> = {};
-                    movedIdsArray.forEach(id => { initialAcc[id] = ''; });
-                    setDropTransferPackages(initialAcc);
+                    // Hanya booking yang berasal dari studio yang sama dengan booking yang di-drag yang ikut pindah timeline
+                    const draggedOriginal = (dragOriginalBookingsRef.current || []).find(b => b.id === draggedBooking?.id);
+                    const draggedStudio = draggedOriginal?.studioType;
+                    const transferIds = draggedStudio
+                        ? movedIdsArray.filter(id => (dragOriginalBookingsRef.current || []).some(b => b.id === id && b.studioType === draggedStudio))
+                        : movedIdsArray;
+
+                    // Cek apakah semua booking yang dipindah adalah Basic Putih dan paket itu tersedia di studio tujuan
+                    const movedBookings = allBookingsRef.current.filter(b => transferIds.includes(b.id));
+                    const targetTypes = targetStudio === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES;
+                    const canAutoTransferBasicPutih =
+                        movedBookings.length > 0 &&
+                        movedBookings.every(b => b.bookingType === 'Basic Putih') &&
+                        targetTypes.includes('Basic Putih');
+
+                    if (canAutoTransferBasicPutih) {
+                        // Sudah tersimulasikan di allBookingsRef.current, cukup resolve collision dan simpan
+                        const resolved = resolveCollisions(allBookingsRef.current, new Set(transferIds));
+                        updateBookings(resolved);
+                        setSelectedBookingIds(new Set());
+                    } else {
+                        // Trigger transfer dialog untuk pilih paket
+                        setDropTransferOriginalBookings(
+                            (dragOriginalBookingsRef.current || []).map(b => ({ ...b }))
+                        );
+                        setDropTransferData({
+                            bookingIds: transferIds,
+                            targetStudio,
+                            updatedSimulatedBookings: allBookingsRef.current // The visually updated state
+                        });
+
+                        // Pre-fill empty selections jika perlu
+                        const initialAcc: Record<string, string> = {};
+                        transferIds.forEach(id => { initialAcc[id] = ''; });
+                        setDropTransferPackages(initialAcc);
+                    }
                 } else {
                     // Save final drag state to Firebase + undo — read from latest state
-                    saveToFirebase(allBookingsRef.current);
+                    saveToFirebase(allBookingsRef.current, dragOriginalBookingsRef.current || []);
                 }
             }
 
@@ -650,7 +972,6 @@ export function TimelineStudio() {
 
     const getActiveBookings = () => {
         return bookings.filter(booking => {
-            if (booking.noShow) return false;
             if (!booking.arrived) return false;
             const bookingStart = booking.startTime;
             const bookingEnd = booking.startTime + booking.duration;
@@ -741,6 +1062,7 @@ export function TimelineStudio() {
         const endTime = booking.startTime + booking.duration;
         const endTimeStr = `${Math.floor(endTime / 60).toString().padStart(2, '0')}:${(endTime % 60).toString().padStart(2, '0')}`;
         const tooltipText = `${booking.customerName}\n${booking.bookingType}\n${timeStr} - ${endTimeStr} (${booking.duration} min)`;
+        const isOverdueNotArrived = currentTimeInMinutes > endTime && !booking.arrived;
 
         const handleBlockClick = (e: React.MouseEvent) => {
             if (wasDraggingRef.current) {
@@ -789,7 +1111,7 @@ export function TimelineStudio() {
             >
                 {/* Main content area */}
                 <div
-                    className={`flex-1 bg-gradient-to-br ${pkgColors.gradient} ${pkgColors.hover} rounded-t-lg ${isNarrow ? 'px-2 py-1.5' : 'px-3 py-1.5'} flex items-center justify-between border-x-2 border-t-2 ${pkgColors.border} shadow-lg transition-all duration-200 hover:shadow-xl relative overflow-hidden ${isDragging ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab'} ${booking.noShow ? 'opacity-50 grayscale' : ''} ${selectedBookingIds.has(booking.id) ? 'ring-4 ring-inset ring-blue-500 border-blue-400' : ''}`}
+                    className={`flex-1 bg-gradient-to-br ${pkgColors.gradient} ${pkgColors.hover} rounded-t-lg ${isNarrow ? 'px-2 py-1.5' : 'px-3 py-1.5'} flex items-center justify-between border-x-2 border-t-2 ${pkgColors.border} shadow-lg transition-all duration-200 hover:shadow-xl relative overflow-hidden ${isDragging ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab'} ${isOverdueNotArrived ? 'opacity-50 grayscale' : ''} ${selectedBookingIds.has(booking.id) ? 'ring-4 ring-inset ring-blue-500 border-blue-400' : ''}`}
                     style={{
                         touchAction: 'none',
                         WebkitUserSelect: 'none',
@@ -834,7 +1156,8 @@ export function TimelineStudio() {
                     <div className="flex-1 overflow-hidden relative z-10 pointer-events-none min-w-0">
                         <div className="flex items-center gap-1.5 mb-0.5">
                             <Move className={`w-3.5 h-3.5 ${textBase} opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0`} />
-                            <User className={`w-3.5 h-3.5 ${textBase} flex-shrink-0`} />
+                            {booking.groupId && <Link2 className={`w-3.5 h-3.5 text-blue-500 drop-shadow-sm flex-shrink-0`} />}
+                            {!booking.groupId && <User className={`w-3.5 h-3.5 ${textBase} flex-shrink-0`} />}
                             <p className={`${textBase} text-sm font-bold truncate drop-shadow-sm`}>{booking.customerName}</p>
                         </div>
                         <p className={`${textBase} text-xs font-medium truncate drop-shadow-sm`}>{booking.bookingType}</p>
@@ -845,27 +1168,22 @@ export function TimelineStudio() {
                 </div>
 
                 {/* Integrated status strip at the bottom */}
-                {!booking.noShow && (
-                    <button
-                        className={`w-full h-[18px] flex items-center justify-center gap-1 text-[9px] font-bold rounded-b-lg border-x-2 border-b-2 transition-colors ${
-                            booking.arrived
-                                ? `${pkgColors.border} bg-emerald-500/80 hover:bg-emerald-500 text-white`
-                                : `${pkgColors.border} bg-amber-400/80 hover:bg-amber-400 text-amber-900`
-                        } ${selectedBookingIds.has(booking.id) ? 'border-blue-400' : ''}`}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            toggleArrived(booking.id);
-                        }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onTouchStart={(e) => e.stopPropagation()}
-                        title={booking.arrived ? 'Klik untuk tandai belum datang' : 'Klik untuk tandai sudah datang'}
-                    >
-                        {booking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
-                    </button>
-                )}
-                {booking.noShow && (
-                    <div className={`w-full h-[18px] rounded-b-lg border-x-2 border-b-2 ${pkgColors.border}`} />
-                )}
+                <button
+                    className={`w-full h-[18px] flex items-center justify-center gap-1 text-[9px] font-bold rounded-b-lg border-x-2 border-b-2 transition-colors ${
+                        booking.arrived
+                            ? `${pkgColors.border} bg-emerald-500/80 hover:bg-emerald-500 text-white`
+                            : `${pkgColors.border} bg-amber-400/80 hover:bg-amber-400 text-amber-900`
+                    } ${selectedBookingIds.has(booking.id) ? 'border-blue-400' : ''}`}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        toggleArrived(booking.id);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    title={booking.arrived ? 'Klik untuk tandai belum datang' : 'Klik untuk tandai sudah datang'}
+                >
+                    {booking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
+                </button>
             </Resizable>
         );
     };
@@ -942,10 +1260,13 @@ export function TimelineStudio() {
                         const totalBookings = todayBookings.length;
                         const completedBookings = todayBookings.filter(b => {
                             const endMin = b.startTime + b.duration;
-                            return currentTimeInMinutes >= endMin;
+                            return currentTimeInMinutes >= endMin && !!b.arrived;
                         }).length;
                         const upcomingBookings = todayBookings.filter(b => currentTimeInMinutes < b.startTime).length;
-                        const noShowBookings = todayBookings.filter(b => b.noShow).length;
+                        const overdueNotArrivedCount = todayBookings.filter(b => {
+                            const endMin = b.startTime + b.duration;
+                            return currentTimeInMinutes > endMin && !b.arrived;
+                        }).length;
                         const studioBawahCount = todayBookings.filter(b => b.studioType === 'bawah').length;
                         const studioAtasCount = todayBookings.filter(b => b.studioType === 'atas').length;
                         const totalMinutes = todayBookings.reduce((sum, b) => sum + b.duration, 0);
@@ -997,10 +1318,10 @@ export function TimelineStudio() {
                                         <span className={dm.recapLabel}>Total Durasi</span>
                                         <span className={`font-bold ${dm.recapDuration}`}>{totalHours}j {remainMinutes}m</span>
                                     </div>
-                                    {noShowBookings > 0 && (
+                                    {overdueNotArrivedCount > 0 && (
                                         <div className="flex items-center justify-between text-xs">
                                             <span className={dm.recapLabel}>Tidak Datang</span>
-                                            <span className="font-bold text-red-500">{noShowBookings} orang</span>
+                                            <span className="font-bold text-red-500">{overdueNotArrivedCount} orang</span>
                                         </div>
                                     )}
                                 </div>
@@ -1085,146 +1406,6 @@ export function TimelineStudio() {
             {/* Timeline Section */}
             <div className={`flex-1 min-h-[500px] ${dm.timelineSection}`}>
                 <div className="p-4 md:p-8 space-y-10">
-                    {/* Studio Bawah */}
-                    <div className="flex flex-col xl:flex-row gap-4">
-                        {/* Fixed Studio Header */}
-                        <div className="flex-shrink-0 w-full xl:w-64">
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg shadow-md">
-                                        <Camera className="w-5 h-5 text-white" />
-                                    </div>
-                                    <div>
-                                        <h2 className={`text-lg font-semibold ${dm.studioTitle}`}>Studio Bawah</h2>
-                                        <p className={`text-xs ${dm.studioSub}`}>Self Photo & Couple</p>
-                                    </div>
-                                </div>
-                            </div>
-                            <Dialog open={isAddDialogOpen && selectedStudio === 'bawah'} onOpenChange={(open) => {
-                                setIsAddDialogOpen(open);
-                                if (open) setSelectedStudio('bawah');
-                            }}>
-                                <DialogTrigger asChild>
-                                    <Button
-                                        size="sm"
-                                        className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 shadow-md"
-                                        onClick={() => {
-                                            setSelectedStudio('bawah');
-                                            const recommended = getNextAvailableTime('bawah');
-                                            setFormData({ ...formData, bookingType: STUDIO_BAWAH_TYPES[0], startHour: recommended.hour, startMinute: recommended.minute });
-                                        }}
-                                    >
-                                        <Plus className="w-4 h-4 mr-2" />
-                                        Add Booking
-                                    </Button>
-                                </DialogTrigger>
-                                <DialogContent className="sm:max-w-[425px]">
-                                    <DialogHeader>
-                                        <DialogTitle className="flex items-center gap-2">
-                                            <Camera className="w-5 h-5 text-purple-600" />
-                                            Tambah Booking - Studio Bawah
-                                        </DialogTitle>
-                                    </DialogHeader>
-                                    <div className="space-y-4 py-4">
-                                        <div>
-                                            <Label htmlFor="name">Nama Customer</Label>
-                                            <Input
-                                                id="name"
-                                                value={formData.customerName}
-                                                onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
-                                                placeholder="Masukkan nama"
-                                            />
-                                        </div>
-                                        <div>
-                                            <Label htmlFor="type">Jenis Booking</Label>
-                                            <Select
-                                                value={formData.bookingType}
-                                                onValueChange={(value) => setFormData({ ...formData, bookingType: value })}
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Pilih jenis" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {STUDIO_BAWAH_TYPES.map(type => (
-                                                        <SelectItem key={type} value={type}>{type}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                        <div className="flex gap-4">
-                                            <div className="flex-1">
-                                                <Label htmlFor="hour">Jam</Label>
-                                                <Input
-                                                    id="hour"
-                                                    type="number"
-                                                    min="0"
-                                                    max="23"
-                                                    value={formData.startHour}
-                                                    onChange={(e) => setFormData({ ...formData, startHour: e.target.value.padStart(2, '0') })}
-                                                />
-                                            </div>
-                                            <div className="flex-1">
-                                                <Label htmlFor="minute">Menit</Label>
-                                                <Select
-                                                    value={formData.startMinute}
-                                                    onValueChange={(value) => setFormData({ ...formData, startMinute: value })}
-                                                >
-                                                    <SelectTrigger>
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="00">00</SelectItem>
-                                                        <SelectItem value="30">30</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        </div>
-                                        <Button onClick={addBooking} className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700">
-                                            Tambah Booking
-                                        </Button>
-                                    </div>
-                                </DialogContent>
-                            </Dialog>
-                        </div>
-
-                        {/* Scrollable Timeline */}
-                        <div
-                            className="flex-1 overflow-x-auto overflow-y-hidden timeline-scroll relative"
-                            ref={scrollContainerBawahRef}
-                            onScroll={(e) => syncScroll('bawah', e.currentTarget.scrollLeft)}
-                            onMouseDownCapture={(e) => handleContainerMouseDown(e)}
-                            onTouchStartCapture={(e) => handleContainerMouseDown(e)}
-                        >
-                            <div className={`relative h-[140px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
-                                {/* Background grid pattern */}
-                                <div className={`absolute inset-0 ${dm.gridPattern} pointer-events-none`}>
-                                    <div className="absolute inset-0 bg-[linear-gradient(to_right,#000_1px,transparent_1px),linear-gradient(to_bottom,#000_1px,transparent_1px)] bg-[size:30px_30px]"></div>
-                                </div>
-
-                                {/* Time Markers */}
-                                <div className="relative h-full pt-6" style={{ width: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
-                                    {renderTimeMarkers()}
-
-                                    {/* Current Time Line with animation */}
-                                    <div
-                                        className="absolute top-0 bottom-0 w-[3px] bg-gradient-to-b from-red-500 via-red-500 to-red-300 z-30 shadow-lg pointer-events-none"
-                                        style={{ left: `${currentTimePosition}px` }}
-                                    >
-                                        <div className="absolute -top-3 -left-2.5 w-6 h-6 bg-red-500 rounded-full shadow-lg flex items-center justify-center animate-pulse border-2 border-white">
-                                            <div className="w-2.5 h-2.5 bg-white rounded-full"></div>
-                                        </div>
-
-                                    </div>
-
-                                    {/* Booking Blocks */}
-                                    <div className="absolute inset-0 pt-7">
-                                        {bookings.filter(b => b.studioType === 'bawah').map(renderBookingBlock)}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     {/* Studio Atas */}
                     <div className="flex flex-col xl:flex-row gap-4">
                         {/* Fixed Studio Header */}
@@ -1273,6 +1454,15 @@ export function TimelineStudio() {
                                                 value={formData.customerName}
                                                 onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
                                                 placeholder="Masukkan nama"
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="phone-atas">No. WhatsApp (opsional)</Label>
+                                            <Input
+                                                id="phone-atas"
+                                                value={formData.customerPhone}
+                                                onChange={(e) => setFormData({ ...formData, customerPhone: normalizePhoneNumber(e.target.value) })}
+                                                placeholder="Contoh: 0812345678"
                                             />
                                         </div>
                                         <div>
@@ -1364,6 +1554,155 @@ export function TimelineStudio() {
                             </div>
                         </div>
                     </div>
+
+                    {/* Studio Bawah */}
+                    <div className="flex flex-col xl:flex-row gap-4">
+                        {/* Fixed Studio Header */}
+                        <div className="flex-shrink-0 w-full xl:w-64">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg shadow-md">
+                                        <Camera className="w-5 h-5 text-white" />
+                                    </div>
+                                    <div>
+                                        <h2 className={`text-lg font-semibold ${dm.studioTitle}`}>Studio Bawah</h2>
+                                        <p className={`text-xs ${dm.studioSub}`}>Self Photo & Couple</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <Dialog open={isAddDialogOpen && selectedStudio === 'bawah'} onOpenChange={(open) => {
+                                setIsAddDialogOpen(open);
+                                if (open) setSelectedStudio('bawah');
+                            }}>
+                                <DialogTrigger asChild>
+                                    <Button
+                                        size="sm"
+                                        className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 shadow-md"
+                                        onClick={() => {
+                                            setSelectedStudio('bawah');
+                                            const recommended = getNextAvailableTime('bawah');
+                                            setFormData({ ...formData, bookingType: STUDIO_BAWAH_TYPES[0], startHour: recommended.hour, startMinute: recommended.minute });
+                                        }}
+                                    >
+                                        <Plus className="w-4 h-4 mr-2" />
+                                        Add Booking
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent className="sm:max-w-[425px]">
+                                    <DialogHeader>
+                                        <DialogTitle className="flex items-center gap-2">
+                                            <Camera className="w-5 h-5 text-purple-600" />
+                                            Tambah Booking - Studio Bawah
+                                        </DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-4 py-4">
+                                        <div>
+                                            <Label htmlFor="name">Nama Customer</Label>
+                                            <Input
+                                                id="name"
+                                                value={formData.customerName}
+                                                onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
+                                                placeholder="Masukkan nama"
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="phone">No. WhatsApp (opsional)</Label>
+                                            <Input
+                                                id="phone"
+                                                value={formData.customerPhone}
+                                                onChange={(e) => setFormData({ ...formData, customerPhone: normalizePhoneNumber(e.target.value) })}
+                                                placeholder="Contoh: 0812345678"
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="type">Jenis Booking</Label>
+                                            <Select
+                                                value={formData.bookingType}
+                                                onValueChange={(value) => setFormData({ ...formData, bookingType: value })}
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Pilih jenis" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {STUDIO_BAWAH_TYPES.map(type => (
+                                                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="flex gap-4">
+                                            <div className="flex-1">
+                                                <Label htmlFor="hour">Jam</Label>
+                                                <Input
+                                                    id="hour"
+                                                    type="number"
+                                                    min="0"
+                                                    max="23"
+                                                    value={formData.startHour}
+                                                    onChange={(e) => setFormData({ ...formData, startHour: e.target.value.padStart(2, '0') })}
+                                                />
+                                            </div>
+                                            <div className="flex-1">
+                                                <Label htmlFor="minute">Menit</Label>
+                                                <Select
+                                                    value={formData.startMinute}
+                                                    onValueChange={(value) => setFormData({ ...formData, startMinute: value })}
+                                                >
+                                                    <SelectTrigger>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="00">00</SelectItem>
+                                                        <SelectItem value="30">30</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+                                        <Button onClick={addBooking} className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700">
+                                            Tambah Booking
+                                        </Button>
+                                    </div>
+                                </DialogContent>
+                            </Dialog>
+                        </div>
+
+                        {/* Scrollable Timeline */}
+                        <div
+                            className="flex-1 overflow-x-auto overflow-y-hidden timeline-scroll relative"
+                            ref={scrollContainerBawahRef}
+                            onScroll={(e) => syncScroll('bawah', e.currentTarget.scrollLeft)}
+                            onMouseDownCapture={(e) => handleContainerMouseDown(e)}
+                            onTouchStartCapture={(e) => handleContainerMouseDown(e)}
+                        >
+                            <div className={`relative h-[140px] ${dm.timelineBox} rounded-xl border-2 shadow-md`} style={{ minWidth: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
+                                {/* Background grid pattern */}
+                                <div className={`absolute inset-0 ${dm.gridPattern} pointer-events-none`}>
+                                    <div className="absolute inset-0 bg-[linear-gradient(to_right,#000_1px,transparent_1px),linear-gradient(to_bottom,#000_1px,transparent_1px)] bg-[size:30px_30px]"></div>
+                                </div>
+
+                                {/* Time Markers */}
+                                <div className="relative h-full pt-6" style={{ width: `${24 * MINUTES_PER_HOUR * PIXEL_PER_MINUTE}px` }}>
+                                    {renderTimeMarkers()}
+
+                                    {/* Current Time Line with animation */}
+                                    <div
+                                        className="absolute top-0 bottom-0 w-[3px] bg-gradient-to-b from-red-500 via-red-500 to-red-300 z-30 shadow-lg pointer-events-none"
+                                        style={{ left: `${currentTimePosition}px` }}
+                                    >
+                                        <div className="absolute -top-3 -left-2.5 w-6 h-6 bg-red-500 rounded-full shadow-lg flex items-center justify-center animate-pulse border-2 border-white">
+                                            <div className="w-2.5 h-2.5 bg-white rounded-full"></div>
+                                        </div>
+
+                                    </div>
+
+                                    {/* Booking Blocks */}
+                                    <div className="absolute inset-0 pt-7">
+                                        {bookings.filter(b => b.studioType === 'bawah').map(renderBookingBlock)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1390,6 +1729,15 @@ export function TimelineStudio() {
                             >
                                 <span className="hidden sm:inline">Batal</span>
                                 <span className="sm:hidden"><X className="w-4 h-4" /></span>
+                            </Button>
+                            <Button
+                                size="sm"
+                                className="flex items-center gap-1.5 sm:gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium border-0 text-xs sm:text-sm px-2 sm:px-3 h-8 sm:h-9"
+                                onClick={linkSelectedBookings}
+                            >
+                                <Link2 className="w-4 h-4" />
+                                <span className="hidden sm:inline">Hubungkan</span>
+                                <span className="sm:hidden">Hubung</span>
                             </Button>
                             <Button
                                 size="sm"
@@ -1432,8 +1780,29 @@ export function TimelineStudio() {
                                 </DialogHeader>
                                 <div className="space-y-3 sm:space-y-4 py-2">
                                     <div className={`bg-gradient-to-br ${pkg.gradient} rounded-lg p-3 sm:p-4 ${pkg.textDark ? 'text-gray-800' : 'text-white'} shadow-md`}>
-                                        <p className="text-base sm:text-lg font-bold truncate">{selectedBooking.customerName}</p>
-                                        <p className="text-xs sm:text-sm opacity-90 truncate">{selectedBooking.bookingType}</p>
+                                        <div className="flex justify-between items-start gap-2">
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-base sm:text-lg font-bold truncate">{selectedBooking.customerName}</p>
+                                                <p className="text-xs sm:text-sm opacity-90 truncate">{selectedBooking.bookingType}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-gray-50 rounded-lg p-3">
+                                        <Label className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-1 block">Nomor WhatsApp</Label>
+                                        <div className="flex gap-2">
+                                            <Input 
+                                                className="h-8 text-xs sm:text-sm flex-1 bg-white" 
+                                                placeholder="Contoh: 081234..." 
+                                                value={selectedBooking.customerPhone || ''} 
+                                                onChange={(e) => {
+                                                    const newPhone = normalizePhoneNumber(e.target.value);
+                                                    const updatedBookings = bookings.map(b => b.id === selectedBooking.id ? { ...b, customerPhone: newPhone } : b);
+                                                    updateBookings(updatedBookings);
+                                                    setSelectedBooking(prev => prev ? { ...prev, customerPhone: newPhone } : null);
+                                                }}
+                                            />
+                                        </div>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-2 sm:gap-3">
@@ -1443,43 +1812,21 @@ export function TimelineStudio() {
                                                 St. {selectedBooking.studioType === 'bawah' ? 'Bawah' : 'Atas'}
                                             </p>
                                         </div>
-                                        <div className="bg-gray-50 rounded-lg p-2 sm:p-3 overflow-hidden">
+                                        <div className="bg-gray-50 rounded-lg p-2 sm:p-3 overflow-hidden space-y-1">
                                             <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Paket</p>
-                                            <div className="flex items-center justify-between gap-1">
-                                                {editPackageMode ? (
-                                                    <Select
-                                                        value={editPackageValue}
-                                                        onValueChange={(val) => {
-                                                            setEditPackageValue(val);
-                                                            const updated = bookings.map(b =>
-                                                                b.id === selectedBooking.id ? { ...b, bookingType: val } : b
-                                                            );
-                                                            updateBookings(updated);
-                                                            setSelectedBooking(prev => prev ? { ...prev, bookingType: val } : null);
-                                                            setEditPackageMode(false);
-                                                        }}
-                                                    >
-                                                        <SelectTrigger className="h-7 text-xs">
-                                                            <SelectValue />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {(selectedBooking.studioType === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES).map(type => (
-                                                                <SelectItem key={type} value={type}>{type}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                ) : (
-                                                    <>
-                                                        <p className="text-xs sm:text-sm font-semibold text-gray-800 truncate">{selectedBooking.bookingType}</p>
-                                                        <button
-                                                            className="text-[10px] text-blue-500 hover:text-blue-700 font-medium flex-shrink-0"
-                                                            onClick={() => { setEditPackageMode(true); setEditPackageValue(selectedBooking.bookingType); }}
-                                                        >
-                                                            Edit
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
+                                            <Select
+                                                value={selectedBooking.bookingType}
+                                                onValueChange={(value) => updateBookingPackage(selectedBooking.id, value)}
+                                            >
+                                                <SelectTrigger className="h-8 text-xs sm:text-sm">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {(selectedBooking.studioType === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES).map(type => (
+                                                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
                                         </div>
                                         <div className="bg-gray-50 rounded-lg p-2 sm:p-3">
                                             <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase font-medium mb-0.5 sm:mb-1">Waktu</p>
@@ -1492,25 +1839,38 @@ export function TimelineStudio() {
                                     </div>
 
                                     {/* Arrived toggle button in detail panel */}
-                                    {!selectedBooking.noShow && (
-                                        <button
-                                            className={`w-full h-10 flex items-center justify-center gap-2 text-sm font-bold rounded-xl border-2 transition-all duration-200 shadow-sm ${
-                                                selectedBooking.arrived
-                                                    ? 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white border-emerald-600'
-                                                    : 'bg-amber-400 hover:bg-amber-500 active:bg-amber-600 text-amber-900 border-amber-500'
-                                            }`}
-                                            onClick={() => {
-                                                toggleArrived(selectedBooking.id);
-                                                setSelectedBooking(prev => prev ? { ...prev, arrived: !prev.arrived } : null);
-                                            }}
-                                        >
-                                            {selectedBooking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
-                                            <span className="text-xs opacity-70 font-normal">(klik untuk ubah)</span>
-                                        </button>
+                                    <button
+                                        className={`w-full h-10 flex items-center justify-center gap-2 text-sm font-bold rounded-xl border-2 transition-all duration-200 shadow-sm ${
+                                            selectedBooking.arrived
+                                                ? 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white border-emerald-600'
+                                                : 'bg-amber-400 hover:bg-amber-500 active:bg-amber-600 text-amber-900 border-amber-500'
+                                        }`}
+                                        onClick={() => {
+                                            toggleArrived(selectedBooking.id);
+                                            setSelectedBooking(prev => prev ? { ...prev, arrived: !prev.arrived } : null);
+                                        }}
+                                    >
+                                        {selectedBooking.arrived ? '✅ Datang' : '⏳ Belum Datang'}
+                                        <span className="text-xs opacity-70 font-normal">(klik untuk ubah)</span>
+                                    </button>
+
+                                    {/* Google Drive Integration */}
+                                    {appSettings?.googleClientId && appSettings?.googleDriveFolderId && (
+                                        <GoogleOAuthProvider clientId={appSettings.googleClientId}>
+                                            <GoogleDriveUploader 
+                                                booking={selectedBooking}
+                                                bookings={bookings}
+                                                updateBookings={updateBookings}
+                                                setSelectedBooking={setSelectedBooking}
+                                                appSettings={appSettings}
+                                                googleToken={googleToken}
+                                                setGoogleToken={setGoogleToken}
+                                            />
+                                        </GoogleOAuthProvider>
                                     )}
 
                                     {/* Action Buttons */}
-                                    <div className="flex flex-col sm:flex-row gap-2">
+                                    <div className="flex flex-col sm:flex-row gap-2 mt-3">
                                         <Button
                                             className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white text-xs sm:text-sm h-9 sm:h-10"
                                             onClick={() => {
@@ -1524,13 +1884,16 @@ export function TimelineStudio() {
                                             variant="outline"
                                             className="flex-1 text-xs sm:text-sm h-9 sm:h-10"
                                             onClick={() => {
-                                                const samePackageExists = destTypes.includes(selectedBooking.bookingType);
-                                                if (samePackageExists) {
-                                                    transferStudio(selectedBooking.id, selectedBooking.bookingType);
-                                                } else {
-                                                    setTransferMode(!transferMode);
-                                                    setTransferPackage('');
+                                                // Jika paket Basic Putih tersedia di kedua studio, langsung pindah tanpa konfirmasi paket
+                                                if (selectedBooking.bookingType === 'Basic Putih') {
+                                                    const targetTypes = destStudio === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES;
+                                                    if (targetTypes.includes('Basic Putih')) {
+                                                        transferStudio(selectedBooking.id);
+                                                        return;
+                                                    }
                                                 }
+                                                setTransferMode(!transferMode);
+                                                setTransferPackage('');
                                             }}
                                         >
                                             <ArrowRightLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
@@ -1563,13 +1926,15 @@ export function TimelineStudio() {
                                         </div>
                                     )}
 
-                                    <Button
-                                        className={`w-full ${selectedBooking.noShow ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600'} text-white`}
-                                        onClick={() => toggleNoShow(selectedBooking.id)}
-                                    >
-                                        <UserX className="w-4 h-4 mr-2" />
-                                        {selectedBooking.noShow ? 'Tandai Hadir' : 'Tandai Tidak Datang'}
-                                    </Button>
+                                    {selectedBooking.groupId && (
+                                        <Button
+                                            className="w-full bg-amber-500 hover:bg-amber-600 text-white font-medium"
+                                            onClick={() => unlinkBooking(selectedBooking.id)}
+                                        >
+                                            <Unlink2 className="w-4 h-4 mr-2" />
+                                            Pisahkan Bokingan (Lepas Grup)
+                                        </Button>
+                                    )}
 
                                     <Button
                                         className="w-full bg-red-600 hover:bg-red-700 text-white font-medium"

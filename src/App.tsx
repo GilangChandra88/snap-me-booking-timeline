@@ -3,10 +3,14 @@ import './index.css';
 import { TimelineStudio } from './components/TimelineStudio';
 import { Dashboard } from './components/Dashboard';
 import { TimerPage } from './components/TimerPage';
-import { LayoutDashboard, CalendarClock, Timer } from 'lucide-react';
+import { LayoutDashboard, CalendarClock, Timer, Wallet, Settings } from 'lucide-react';
+import { CashierPage } from './components/CashierPage';
+import { SettingsPage } from './components/SettingsPage';
+import { GlobalDriveService } from './components/GlobalDriveService';
+import { Toaster } from 'sonner';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<'timeline' | 'dashboard' | 'timer'>('timeline');
+  const [currentPage, setCurrentPage] = useState<'timeline' | 'dashboard' | 'timer' | 'kasir' | 'setting'>('timeline');
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
@@ -49,6 +53,26 @@ function App() {
                   <Timer className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                   <span className="hidden sm:inline">Timer Live</span>
                 </button>
+                <button
+                  onClick={() => setCurrentPage('kasir')}
+                  className={`inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${currentPage === 'kasir'
+                    ? 'bg-purple-50 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800'
+                    }`}
+                >
+                  <Wallet className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Kasir</span>
+                </button>
+                <button
+                  onClick={() => setCurrentPage('setting')}
+                  className={`inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${currentPage === 'setting'
+                    ? 'bg-purple-50 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800'
+                    }`}
+                >
+                  <Settings className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Setting</span>
+                </button>
               </div>
             </div>
           </div>
@@ -60,7 +84,11 @@ function App() {
         {currentPage === 'timeline' && <TimelineStudio />}
         {currentPage === 'dashboard' && <Dashboard />}
         {currentPage === 'timer' && <TimerPage />}
+        {currentPage === 'kasir' && <CashierPage />}
+        {currentPage === 'setting' && <SettingsPage />}
       </main>
+      <GlobalDriveService />
+      <Toaster position="top-right" richColors closeButton />
     </div>
   );
 }

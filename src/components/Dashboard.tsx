@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { database } from '../lib/firebase';
-import { ref, onValue, set } from 'firebase/database';
+import { db } from '../lib/firebase';
+import { collection, onSnapshot, writeBatch, doc } from 'firebase/firestore';
 import { getLocalYMD } from './TimelineStudio';
 import type { Booking } from './TimelineStudio';
 import { Users, Camera, Clock, XCircle, CalendarDays, CalendarRange, Calendar as CalendarIcon, Plus, Pencil, Trash2 } from 'lucide-react';
@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { normalizePhoneNumber } from '../lib/utils';
+import { toast } from 'sonner';
 
 const STUDIO_BAWAH_TYPES = [
     'Basic Putih',
@@ -33,6 +35,7 @@ export function Dashboard() {
     const [isAddOpen, setIsAddOpen] = useState(false);
     const [addForm, setAddForm] = useState({
         customerName: '',
+        customerPhone: '',
         studioType: 'bawah' as 'bawah' | 'atas',
         bookingType: STUDIO_BAWAH_TYPES[0],
         date: getLocalYMD(new Date()),
@@ -45,6 +48,7 @@ export function Dashboard() {
     const [editBooking, setEditBooking] = useState<Booking | null>(null);
     const [editForm, setEditForm] = useState({
         customerName: '',
+        customerPhone: '',
         studioType: 'bawah' as 'bawah' | 'atas',
         bookingType: '',
         startHour: '09',
@@ -56,24 +60,52 @@ export function Dashboard() {
     const [deleteTarget, setDeleteTarget] = useState<Booking | null>(null);
 
     useEffect(() => {
-        const bookingsDbRef = ref(database, 'bookings');
-        const unsubscribe = onValue(bookingsDbRef, (snapshot) => {
-            const data = snapshot.val();
-            if (data) {
-                setAllBookings(Object.values(data));
-            } else {
-                setAllBookings([]);
-            }
+        const unsubscribe = onSnapshot(collection(db, 'bookings'), (snapshot) => {
+            const list: Booking[] = [];
+            snapshot.forEach((docSnap) => {
+                list.push(docSnap.data() as Booking);
+            });
+            setAllBookings(list);
         });
         return () => unsubscribe();
     }, []);
 
     // --- Firebase write helper ---
-    const saveAllBookings = (newList: Booking[]) => {
-        const bookingsDbRef = ref(database, 'bookings');
-        const map: Record<string, Booking> = {};
-        newList.forEach(b => { map[b.id] = b; });
-        set(bookingsDbRef, map);
+    const saveAllBookings = async (newList: Booking[]) => {
+        try {
+            const batch = writeBatch(db);
+            
+            // To simulate setting the whole map, we just overwrite/set all bookings in the list.
+            // If deletions occurred, they should ideally be handled explicitly, but here we just set the new ones.
+            // A more robust way would be to delete missing ones if this is truly replacing the whole collect,
+            // but the CRUD handlers in this component usually just add/update/remove individually anyway.
+            
+            // However, the prior code `set(ref, map)` replaced the entire list. To prevent ghost docs:
+            // For now we trust the CRUD handlers: handleAdd (appends), handleEditSave (maps), handleDelete (filters).
+            // Actually, because this component does handleDelete by filtering and calling saveAllBookings, 
+            // we must properly delete docs not in newList.
+            
+            const currentIds = new Set(allBookings.map(b => b.id));
+            const newIds = new Set(newList.map(b => b.id));
+            
+            // Delete removed bookings
+            for (const id of currentIds) {
+                if (!newIds.has(id)) {
+                    batch.delete(doc(db, 'bookings', id));
+                }
+            }
+            // Set all remaining/new bookings
+            newList.forEach(b => {
+                // Remove any undefined properties since Firestore explicitly rejects them
+                const sanitizedBooking = JSON.parse(JSON.stringify(b));
+                batch.set(doc(db, 'bookings', b.id), sanitizedBooking);
+            });
+            
+            await batch.commit();
+        } catch (e) {
+            console.error(e);
+            alert("Gagal menyimpan bookings: " + String(e));
+        }
     };
 
     // Find the next available time slot for a given studio on a given date
@@ -115,6 +147,7 @@ export function Dashboard() {
             studioType: addForm.studioType,
             bookingType: addForm.bookingType,
             customerName: addForm.customerName.trim(),
+            ...(addForm.customerPhone.trim() ? { customerPhone: addForm.customerPhone.trim() } : {}),
             startTime,
             duration: Math.max(MIN_DURATION, parseInt(addForm.duration) || MIN_DURATION),
         };
@@ -123,6 +156,7 @@ export function Dashboard() {
         setIsAddOpen(false);
         setAddForm({
             customerName: '',
+            customerPhone: '',
             studioType: 'bawah',
             bookingType: STUDIO_BAWAH_TYPES[0],
             date: getLocalYMD(new Date()),
@@ -130,12 +164,14 @@ export function Dashboard() {
             startMinute: '00',
             duration: '30',
         });
+        toast.success(`Booking untuk ${newBooking.customerName} berhasil ditambahkan!`);
     };
 
     const openEditDialog = (b: Booking) => {
         setEditBooking(b);
         setEditForm({
             customerName: b.customerName,
+            customerPhone: b.customerPhone || '',
             studioType: b.studioType,
             bookingType: b.bookingType,
             startHour: Math.floor(b.startTime / 60).toString().padStart(2, '0'),
@@ -147,20 +183,26 @@ export function Dashboard() {
     const handleEditSave = () => {
         if (!editBooking || !editForm.customerName.trim()) return;
         const startTime = parseInt(editForm.startHour) * 60 + parseInt(editForm.startMinute);
-        const updated = allBookings.map(b =>
-            b.id === editBooking.id
-                ? {
-                    ...b,
-                    customerName: editForm.customerName.trim(),
-                    studioType: editForm.studioType,
-                    bookingType: editForm.bookingType,
-                    startTime,
-                    duration: Math.max(MIN_DURATION, parseInt(editForm.duration) || MIN_DURATION),
-                }
-                : b
-        );
+        const updated = allBookings.map(b => {
+            if (b.id !== editBooking.id) return b;
+            const updatedBooking: Booking = {
+                ...b,
+                customerName: editForm.customerName.trim(),
+                studioType: editForm.studioType,
+                bookingType: editForm.bookingType,
+                startTime,
+                duration: Math.max(MIN_DURATION, parseInt(editForm.duration) || MIN_DURATION),
+            };
+            if (editForm.customerPhone.trim()) {
+                updatedBooking.customerPhone = editForm.customerPhone.trim();
+            } else {
+                delete updatedBooking.customerPhone;
+            }
+            return updatedBooking;
+        });
         saveAllBookings(updated);
         setEditBooking(null);
+        toast.success('Booking berhasil diupdate!');
     };
 
     const handleDelete = () => {
@@ -168,6 +210,7 @@ export function Dashboard() {
         const updated = allBookings.filter(b => b.id !== deleteTarget.id);
         saveAllBookings(updated);
         setDeleteTarget(null);
+        toast.success('Booking berhasil dihapus.');
     };
 
     const filteredBookings = useMemo(() => {
@@ -199,12 +242,20 @@ export function Dashboard() {
 
     // Recap Stats
     const totalBookings = filteredBookings.length;
-    const totalMinutes = filteredBookings.reduce((sum, b) => sum + (b.noShow ? 0 : b.duration), 0);
+    const totalMinutes = filteredBookings.reduce((sum, b) => sum + (b.arrived ? b.duration : 0), 0);
     const totalHours = Math.floor(totalMinutes / 60);
     const remainMinutes = totalMinutes % 60;
     const studioBawahCount = filteredBookings.filter(b => b.studioType === 'bawah').length;
     const studioAtasCount = filteredBookings.filter(b => b.studioType === 'atas').length;
-    const noShowCount = filteredBookings.filter(b => b.noShow).length;
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const todayYMDForNoShow = getLocalYMD(now);
+    const noShowCount = filteredBookings.filter(b => {
+        const bDate = b.date || todayYMDForNoShow;
+        if (bDate !== todayYMDForNoShow) return false;
+        const endMin = b.startTime + b.duration;
+        return nowMinutes > endMin && !b.arrived;
+    }).length;
 
     // Format time helper
     const formatTime = (minutes: number) => {
@@ -358,19 +409,31 @@ export function Dashboard() {
                                             <td className="px-4 py-4 text-gray-600 dark:text-gray-400">{b.bookingType}</td>
                                             <td className="px-4 py-4 text-gray-600 dark:text-gray-400">{b.duration} Min</td>
                                             <td className="px-4 py-4">
-                                                {b.noShow ? (
-                                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
-                                                        Tidak Datang
-                                                    </span>
-                                                ) : b.arrived ? (
-                                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
-                                                        Datang
-                                                    </span>
-                                                ) : (
-                                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
-                                                        Belum Datang
-                                                    </span>
-                                                )}
+                                                {(() => {
+                                                    const todayYMD = getLocalYMD(new Date());
+                                                    const bDate = b.date || todayYMD;
+                                                    const endMin = b.startTime + b.duration;
+                                                    const isNoShow = bDate === todayYMD && (new Date().getHours() * 60 + new Date().getMinutes()) > endMin && !b.arrived;
+                                                    if (isNoShow) {
+                                                        return (
+                                                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300">
+                                                                Tidak Datang
+                                                            </span>
+                                                        );
+                                                    }
+                                                    if (b.arrived) {
+                                                        return (
+                                                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
+                                                                Datang
+                                                            </span>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+                                                            Belum Datang
+                                                        </span>
+                                                    );
+                                                })()}
                                             </td>
                                             <td className="px-4 py-4">
                                                 <div className="flex items-center justify-center gap-1">
@@ -425,6 +488,14 @@ export function Dashboard() {
                                 value={addForm.customerName}
                                 onChange={(e) => setAddForm({ ...addForm, customerName: e.target.value })}
                                 placeholder="Masukkan nama"
+                            />
+                        </div>
+                        <div>
+                            <Label>No. WhatsApp (opsional)</Label>
+                            <Input
+                                value={addForm.customerPhone}
+                                onChange={(e) => setAddForm({ ...addForm, customerPhone: normalizePhoneNumber(e.target.value) })}
+                                placeholder="Contoh: 081234567"
                             />
                         </div>
                         <div>
@@ -525,6 +596,14 @@ export function Dashboard() {
                                 <Input
                                     value={editForm.customerName}
                                     onChange={(e) => setEditForm({ ...editForm, customerName: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <Label>No. WhatsApp (opsional)</Label>
+                                <Input
+                                    value={editForm.customerPhone}
+                                    onChange={(e) => setEditForm({ ...editForm, customerPhone: normalizePhoneNumber(e.target.value) })}
+                                    placeholder="Contoh: 081234567"
                                 />
                             </div>
                             <div>
