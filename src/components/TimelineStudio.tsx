@@ -228,7 +228,7 @@ function GoogleDriveUploader({
                                     const caption = `Hallo kak, ini hasil fotonya ya ${String.fromCodePoint(0x1F64C)}\n${booking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan ${String.fromCodePoint(0x1F60A)}\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami ${String.fromCodePoint(0x1F929)}${String.fromCodePoint(0x1F4F8)}\n\n_Snap Me Self Photo, Where moments come alive_`;
                                     let waPhone = (booking.customerPhone || '').replace(/\D/g, '');
                                     if (waPhone.startsWith('0')) waPhone = '62' + waPhone.substring(1);
-                                    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(caption)}`, '_blank');
+                                    window.open(`https://api.whatsapp.com/send?phone=${waPhone}&text=${encodeURIComponent(caption)}`, '_blank');
                                     // Mark as sent
                                     const batch = writeBatch(db);
                                     batch.update(doc(db, 'bookings', booking.id), { waSent: true });
@@ -247,7 +247,7 @@ function GoogleDriveUploader({
                                     let waPhone = (booking.customerPhone || '').replace(/\D/g, '');
                                     if (waPhone.startsWith('0')) waPhone = '62' + waPhone.substring(1);
                                     const message = `https://g.page/r/CaIIjtk0smLtEBM/review\n\nTerimakasih sudah foto di Snapme_singaraja ya kak${String.fromCodePoint(0x2728)}${String.fromCodePoint(0x1F929)}\n\nKami Dari Snapme Singaraja ingin meminta ulasan terkait pelayanan  dan hasil foto kami kepada Customer. Untuk itu mohon bantuannya klik link di atas\nDan berikan kritikan/saran terkait pelayanan kami, Agar bisa lebih baik kedepannya ya kak terimakasih ${String.fromCodePoint(0x1F970)}${String.fromCodePoint(0x1F64F)}${String.fromCodePoint(0x1F3FB)}`;
-                                    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank');
+                                    window.open(`https://api.whatsapp.com/send?phone=${waPhone}&text=${encodeURIComponent(message)}`, '_blank');
                                     // Mark as sent
                                     const batch = writeBatch(db);
                                     batch.update(doc(db, 'bookings', booking.id), { reviewSent: true });

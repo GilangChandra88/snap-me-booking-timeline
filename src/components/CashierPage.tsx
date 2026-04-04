@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { db } from '../lib/firebase';
 import { collection, doc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { normalizePhoneNumber } from '../lib/utils';
@@ -1183,7 +1183,7 @@ export function CashierPage() {
                   setPdfInvoice(null);
                 } else {
                   const msg = `Halo, berikut nota dari Snap Me. Terima kasih!`;
-                  const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+                  const url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`;
                   window.open(url, '_blank');
                 }
               }}
