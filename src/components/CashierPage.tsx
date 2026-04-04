@@ -982,7 +982,7 @@ export function CashierPage() {
                                 variant="outline"
                                 className="flex-1 h-10 rounded-xl text-xs font-bold bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100"
                                 onClick={() => {
-                                  const caption = `Hallo kak, ini hasil fotonya ya 🙌✨\n${selectedBooking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
+                                  const caption = `Hallo kak, ini hasil fotonya ya 🙌\n${selectedBooking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
                                   navigator.clipboard.writeText(caption);
                                   toast.success('Caption + Link Drive berhasil disalin ke clipboard!');
                                 }}
@@ -993,7 +993,7 @@ export function CashierPage() {
                                 variant="outline"
                                 className="flex-1 h-10 rounded-xl text-xs font-bold bg-green-50 border-green-300 text-green-700 hover:bg-green-100"
                                 onClick={() => {
-                                  const caption = `Hallo kak, ini hasil fotonya ya 🙌✨\n${selectedBooking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
+                                  const caption = `Hallo kak, ini hasil fotonya ya 🙌\n${selectedBooking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
                                   let waPhone = selectedBooking.customerPhone || '';
                                   if (waPhone.startsWith('0')) {
                                     waPhone = '62' + waPhone.substring(1);

@@ -136,3 +136,16 @@
   display: none;
   /* Chrome/Safari/Opera */
 }
+
+@media print {
+  @page { margin: 0; size: 4in 6in; }
+  body { 
+    -webkit-print-color-adjust: exact; 
+    print-color-adjust: exact; 
+    margin: 0;
+    padding: 0;
+    width: 4in;
+    height: 6in;
+    overflow: hidden;
+  }
+}

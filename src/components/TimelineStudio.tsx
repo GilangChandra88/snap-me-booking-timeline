@@ -211,7 +211,7 @@ function GoogleDriveUploader({
                             className="flex-1 text-xs h-8 bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
                             variant="outline"
                             onClick={() => {
-                                const caption = `Hallo kak, ini hasil fotonya ya 🙌✨\n${booking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
+                                const caption = `Hallo kak, ini hasil fotonya ya 🙌\n${booking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
                                 navigator.clipboard.writeText(caption);
                                 alert('Caption + Link Drive berhasil disalin!');
                             }}
@@ -225,7 +225,7 @@ function GoogleDriveUploader({
                                 className={`w-full text-xs h-8 ${booking.waSent ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-default' : 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100 hover:text-green-800'}`}
                                 variant="outline"
                                 onClick={() => {
-                                    const caption = `Hallo kak, ini hasil fotonya ya 🙌✨\n${booking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
+                                    const caption = `Hallo kak, ini hasil fotonya ya 🙌\n${booking.driveLink}\nJangan lupa di-download ya kak, karena file di drive hanya bertahan selama 1 bulan 😊\nKalau kakak berkenan, boleh banget tag @snapme_singaraja saat upload di Instagram Story.\n\nTerima kasih banyak sudah mempercayakan momen kakak ke kami 🤩📸\n\n_Snap Me Self Photo, Where moments come alive_`;
                                     let waPhone = (booking.customerPhone || '').replace(/\D/g, '');
                                     if (waPhone.startsWith('0')) waPhone = '62' + waPhone.substring(1);
                                     window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(caption)}`, '_blank');
@@ -397,7 +397,7 @@ export function TimelineStudio() {
         return () => unsubscribe();
     }, []);
 
-    // Save ALL bookings to Firebase
+    // Save ONLY CHANGED bookings to Firebase
     const saveToFirebase = useCallback(async (newBookings: Booking[], oldBookings: Booking[]) => {
         firebaseWriteRef.current = true;
         
@@ -413,9 +413,15 @@ export function TimelineStudio() {
                 }
             }
             
+            const oldMap = new Map(oldBookings.map(b => [b.id, b]));
+            
             newBookings.forEach(b => {
-                const sanitizedBooking = JSON.parse(JSON.stringify(b));
-                batch.set(doc(db, 'bookings', b.id), sanitizedBooking);
+                const oldB = oldMap.get(b.id);
+                // Only write if the booking is new OR has changed
+                if (!oldB || JSON.stringify(oldB) !== JSON.stringify(b)) {
+                    const sanitizedBooking = JSON.parse(JSON.stringify(b));
+                    batch.set(doc(db, 'bookings', b.id), sanitizedBooking);
+                }
             });
             
             await batch.commit();

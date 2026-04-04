@@ -74,17 +74,6 @@ export function Dashboard() {
     const saveAllBookings = async (newList: Booking[]) => {
         try {
             const batch = writeBatch(db);
-            
-            // To simulate setting the whole map, we just overwrite/set all bookings in the list.
-            // If deletions occurred, they should ideally be handled explicitly, but here we just set the new ones.
-            // A more robust way would be to delete missing ones if this is truly replacing the whole collect,
-            // but the CRUD handlers in this component usually just add/update/remove individually anyway.
-            
-            // However, the prior code `set(ref, map)` replaced the entire list. To prevent ghost docs:
-            // For now we trust the CRUD handlers: handleAdd (appends), handleEditSave (maps), handleDelete (filters).
-            // Actually, because this component does handleDelete by filtering and calling saveAllBookings, 
-            // we must properly delete docs not in newList.
-            
             const currentIds = new Set(allBookings.map(b => b.id));
             const newIds = new Set(newList.map(b => b.id));
             
@@ -94,11 +83,17 @@ export function Dashboard() {
                     batch.delete(doc(db, 'bookings', id));
                 }
             }
-            // Set all remaining/new bookings
+            
+            const oldMap = new Map(allBookings.map(b => [b.id, b]));
+            
+            // Set only remaining/new bookings THAT ACTUALLY CHANGED
             newList.forEach(b => {
-                // Remove any undefined properties since Firestore explicitly rejects them
-                const sanitizedBooking = JSON.parse(JSON.stringify(b));
-                batch.set(doc(db, 'bookings', b.id), sanitizedBooking);
+                const oldB = oldMap.get(b.id);
+                if (!oldB || JSON.stringify(oldB) !== JSON.stringify(b)) {
+                    // Remove any undefined properties since Firestore explicitly rejects them
+                    const sanitizedBooking = JSON.parse(JSON.stringify(b));
+                    batch.set(doc(db, 'bookings', b.id), sanitizedBooking);
+                }
             });
             
             await batch.commit();
