@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { db } from '../lib/firebase';
 import { collection, doc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { normalizePhoneNumber } from '../lib/utils';
@@ -470,7 +470,7 @@ export function CashierPage() {
         `No. Nota: ${invoice.id}`,
         `Total: ${formatRp(invoice.total)}`,
         `Pembayaran: ${invoice.paymentMethod.toUpperCase()}`,
-        invoice.driveLink ? `\nðŸ”— *Link Folder Foto Anda:*\n${invoice.driveLink}\n` : '',
+        invoice.driveLink ? `\n🔗 *Link Folder Foto Anda:*\n${invoice.driveLink}\n` : '',
         `Terima kasih!`,
       ].filter(Boolean).join('\n');
 
@@ -497,7 +497,7 @@ export function CashierPage() {
       `No. Nota: ${invoice.id}`,
       `Total: ${formatRp(invoice.total)}`,
       `Pembayaran: ${invoice.paymentMethod.toUpperCase()}`,
-      invoice.driveLink ? `\nðŸ”— *Link Folder Foto Anda:*\n${invoice.driveLink}\n` : '',
+      invoice.driveLink ? `\n🔗 *Link Folder Foto Anda:*\n${invoice.driveLink}\n` : '',
       `Terima kasih!`,
     ].filter(Boolean).join('\n');
     // Normalize phone number for WA
