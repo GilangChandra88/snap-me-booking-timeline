@@ -1,15 +1,14 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Camera, Image as ImageIcon, LayoutTemplate, Printer, Plus, Trash2, CheckCircle2, Save, Upload, GripHorizontal, Settings2, Layers as LayersIcon, ChevronLeft } from 'lucide-react';
+import { Image as ImageIcon, LayoutTemplate, Plus, Trash2, Save, Upload, GripHorizontal, Settings2, Layers as LayersIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Resizable } from 're-resizable';
-import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
-import type { AppSettings } from './SettingsPage';
+
 
 // --- Interfaces ---
 interface PhotoSlot {
@@ -47,22 +46,6 @@ interface Template {
     images?: CustomImage[];
 }
 
-interface DrivePhoto {
-    id: string;
-    name: string;
-    thumbnailLink: string;
-    webContentLink: string;
-}
-
-interface Booking {
-    id: string;
-    customerName: string;
-    date: string;
-    studioType: string;
-    driveFolderId?: string;
-    driveLink?: string;
-    printSession?: { templateId: string, slotAssignments: Record<string, string> };
-}
 
 // --- Draggable Resizable Slot Component ---
 function DraggableSlot({ 
