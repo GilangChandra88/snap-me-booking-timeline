@@ -556,7 +556,7 @@ function PrintPageContent() {
             {!googleToken && (
                 <div className="p-4 bg-amber-50 text-amber-900 border-b border-amber-200 text-center text-sm font-medium shrink-0 flex items-center justify-center gap-4">
                     <span>⚠️ Anda belum login ke Google Drive. Silakan Login terlebih dahulu agar bisa menarik foto.</span>
-                    <Button onClick={() => loginGoogle()} variant="outline" size="sm" className="bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50">
+                    <Button onClick={() => loginGoogle()} variant="outline" size="sm" className="bg-white text-blue-600 border-blue-200 hover:bg-blue-50">
                         Login Google Drive
                     </Button>
                 </div>
@@ -582,12 +582,12 @@ function PrintPageContent() {
                                 <button
                                     key={f.id}
                                     onClick={() => setSelectedFolder(f)}
-                                    className="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 hover:border-indigo-400 hover:shadow-md transition-all text-left group flex flex-col items-start focus:outline-none focus:ring-4 focus:ring-indigo-500/20"
+                                    className="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all text-left group flex flex-col items-start focus:outline-none focus:ring-4 focus:ring-blue-500/20"
                                 >
-                                    <div className="w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center mb-4 group-hover:bg-indigo-100 transition-colors">
-                                        <LayersIcon className="w-6 h-6 text-indigo-500" />
+                                    <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center mb-4 group-hover:bg-blue-100 transition-colors">
+                                        <LayersIcon className="w-6 h-6 text-blue-500" />
                                     </div>
-                                    <h3 className="font-bold text-gray-800 text-sm truncate w-full group-hover:text-indigo-600 transition-colors">{f.customerName}</h3>
+                                    <h3 className="font-bold text-gray-800 text-sm truncate w-full group-hover:text-blue-600 transition-colors">{f.customerName}</h3>
                                     <p className="text-xs text-gray-500 font-medium mt-0.5 opacity-80">{f.date}</p>
                                     
                                     {f.printSession && (
@@ -610,11 +610,11 @@ function PrintPageContent() {
                             </Button>
                             <div className="h-6 w-px bg-gray-300 rounded-full"></div>
                             <div>
-                                <h2 className="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">Isi Template: {selectedFolder.customerName}</h2>
+                                <h2 className="text-lg font-bold bg-gradient-to-r from-sky-600 to-blue-600 bg-clip-text text-transparent">Isi Template: {selectedFolder.customerName}</h2>
                                 <p className="text-xs text-gray-500 font-medium">Pilih foto dari kiri, lalu atur ke template di sebelah kanan.</p>
                             </div>
                         </div>
-                        <Button onClick={handlePrint} disabled={printJobs.length === 0 || isPreloading} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/20 dark:shadow-none transition-transform hover:scale-105 font-bold h-10 px-6 rounded-xl disabled:opacity-70 disabled:cursor-wait">
+                        <Button onClick={handlePrint} disabled={printJobs.length === 0 || isPreloading} className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/20 dark:shadow-none transition-transform hover:scale-105 font-bold h-10 px-6 rounded-xl disabled:opacity-70 disabled:cursor-wait">
                             <Printer className="w-4 h-4 mr-2" /> {isPreloading ? 'Memuat foto...' : 'Cetak 4R'}
                         </Button>
                     </div>
@@ -630,7 +630,7 @@ function PrintPageContent() {
                             enable={{ right: true }}
                             className="border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 flex flex-col shrink-0 shadow-sm z-10 overflow-hidden"
                             handleComponent={{
-                                right: <div className="w-1.5 h-full bg-transparent hover:bg-indigo-300 absolute right-0 cursor-col-resize z-50 transition-colors" />
+                                right: <div className="w-1.5 h-full bg-transparent hover:bg-blue-300 absolute right-0 cursor-col-resize z-50 transition-colors" />
                             }}
                         >
                             <div className="flex-1 overflow-y-auto p-4 flex flex-col">
@@ -638,7 +638,7 @@ function PrintPageContent() {
                             
                             {isLoadingPhotos ? (
                                 <div className="flex-1 flex flex-col items-center justify-center gap-3">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                                     <span className="text-sm text-gray-400 animate-pulse font-medium">Menarik foto...</span>
                                 </div>
                             ) : drivePhotos.length === 0 ? (
@@ -665,12 +665,12 @@ function PrintPageContent() {
                                                     e.dataTransfer.setData('photoId', photo.id);
                                                     e.dataTransfer.effectAllowed = 'copy';
                                                 }}
-                                                className={`group relative aspect-[3/4] rounded-lg overflow-hidden transition-all focus:outline-none cursor-pointer ${middlePreviewPhoto?.id === photo.id ? 'ring-[3px] ring-indigo-500 ring-offset-2 scale-[0.98]' : isUsed ? 'ring-2 ring-green-400 ring-offset-1 opacity-85' : 'bg-gray-200 hover:ring-2 hover:ring-indigo-300 hover:scale-[1.02]'}`}
+                                                className={`group relative aspect-[3/4] rounded-lg overflow-hidden transition-all focus:outline-none cursor-pointer ${middlePreviewPhoto?.id === photo.id ? 'ring-[3px] ring-blue-500 ring-offset-2 scale-[0.98]' : isUsed ? 'ring-2 ring-green-400 ring-offset-1 opacity-85' : 'bg-gray-200 hover:ring-2 hover:ring-blue-300 hover:scale-[1.02]'}`}
                                             >
                                                 <img src={photo.thumbnailLink ? photo.thumbnailLink.replace(/=s\d+/, '=s600') : photo.thumbnailLink} alt={photo.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" referrerPolicy="no-referrer" />
                                                 
                                                 {/* Selected Indication Overlay */}
-                                                {middlePreviewPhoto?.id === photo.id && <div className="absolute inset-0 bg-indigo-500/20"></div>}
+                                                {middlePreviewPhoto?.id === photo.id && <div className="absolute inset-0 bg-blue-500/20"></div>}
                                                 
                                                 {isUsed && (
                                                     <div className="absolute top-1.5 left-1.5 bg-green-500 text-white rounded-full p-0.5 shadow-md border-[1.5px] border-white">
@@ -741,7 +741,7 @@ function PrintPageContent() {
                                         {/* Quick Add To Template Button */}
                                         <div className="absolute top-6 left-6 z-10 opacity-0 group-hover/preview:opacity-100 transition-opacity">
                                             <Button 
-                                                className="rounded-full shadow-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                                                className="rounded-full shadow-lg bg-blue-600 hover:bg-blue-700 text-white font-bold"
                                                 onClick={() => {
                                                     if (printJobs.length === 0) return toast.warning('Pilih template 4R dulu!');
                                                     const hiRes = middlePreviewPhoto.thumbnailLink ? middlePreviewPhoto.thumbnailLink.replace(/=s\d+/, '=s0') : middlePreviewPhoto.thumbnailLink;
@@ -805,17 +805,17 @@ function PrintPageContent() {
                             enable={{ left: true }}
                             className="bg-gray-100 dark:bg-black/50 flex flex-col shrink-0 shadow-[-10px_0_20px_-10px_rgba(0,0,0,0.05)] z-20 overflow-hidden"
                             handleComponent={{
-                                left: <div className="w-1.5 h-full bg-transparent hover:bg-indigo-300 absolute left-0 cursor-col-resize z-50 transition-colors" />
+                                left: <div className="w-1.5 h-full bg-transparent hover:bg-blue-300 absolute left-0 cursor-col-resize z-50 transition-colors" />
                             }}
                         >
                             <div className="flex-1 overflow-y-auto p-6 flex flex-col justify-start">
                             {printJobs.length === 0 && !isSelectingTemplate ? (
                                 <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                                    <div className="w-full aspect-[2/3] border-4 border-dashed border-gray-300 dark:border-gray-700 rounded-2xl flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900/50 group hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 transition-all cursor-pointer shadow-sm" onClick={() => setIsSelectingTemplate(true)}>
-                                        <div className="w-16 h-16 mb-4 rounded-full bg-gray-100 flex items-center justify-center group-hover:bg-indigo-100 transition-colors">
-                                            <Plus className="w-8 h-8 text-gray-400 group-hover:text-indigo-500 transition-colors" />
+                                    <div className="w-full aspect-[2/3] border-4 border-dashed border-gray-300 dark:border-gray-700 rounded-2xl flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900/50 group hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-900/20 transition-all cursor-pointer shadow-sm" onClick={() => setIsSelectingTemplate(true)}>
+                                        <div className="w-16 h-16 mb-4 rounded-full bg-gray-100 flex items-center justify-center group-hover:bg-blue-100 transition-colors">
+                                            <Plus className="w-8 h-8 text-gray-400 group-hover:text-blue-500 transition-colors" />
                                         </div>
-                                        <h3 className="text-lg font-bold text-gray-500 group-hover:text-indigo-600 mb-1">Pilih Template 4R</h3>
+                                        <h3 className="text-lg font-bold text-gray-500 group-hover:text-blue-600 mb-1">Pilih Template 4R</h3>
                                     </div>
                                 </div>
                             ) : isSelectingTemplate && printJobs.length === 0 ? (
@@ -834,7 +834,7 @@ function PrintPageContent() {
                                                     setPrintJobs([{ id: `job-${Date.now()}`, templateId: t.id, slotAssignments: {} }]); 
                                                     setIsSelectingTemplate(false); 
                                                 }}
-                                                className={`relative rounded-xl border-2 overflow-hidden aspect-[2/3] border-gray-200 dark:border-gray-700 bg-white shadow-sm dark:bg-gray-800 hover:border-indigo-400 hover:shadow-md transition-all focus:outline-none`}
+                                                className={`relative rounded-xl border-2 overflow-hidden aspect-[2/3] border-gray-200 dark:border-gray-700 bg-white shadow-sm dark:bg-gray-800 hover:border-blue-400 hover:shadow-md transition-all focus:outline-none`}
                                             >
                                                 <img src={t.imageUrl} alt={t.name} className="w-full h-full object-cover" />
                                                 <div className="absolute inset-x-0 bottom-0 bg-black/70 p-2 backdrop-blur-md border-t border-white/10">
@@ -899,8 +899,8 @@ function PrintPageContent() {
                                                                 dragOverSlot?.jobId === job.id && dragOverSlot.slotId === slot.id
                                                                     ? 'ring-4 ring-green-400 ring-inset shadow-[0_0_24px_rgba(74,222,128,0.6)] bg-green-50 scale-[1.02]'
                                                                     : activeTargetSlot?.jobId === job.id && activeTargetSlot.slotId === slot.id
-                                                                    ? 'ring-4 ring-indigo-500 ring-inset shadow-[0_0_20px_rgba(99,102,241,0.5)] bg-indigo-50'
-                                                                    : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 hover:ring-2 hover:ring-indigo-300 hover:ring-inset'
+                                                                    ? 'ring-4 ring-blue-500 ring-inset shadow-[0_0_20px_rgba(99,102,241,0.5)] bg-blue-50'
+                                                                    : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 hover:ring-2 hover:ring-blue-300 hover:ring-inset'
                                                             }`}
                                                             style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.width}%`, height: `${slot.height}%`, zIndex: slot.zIndex || 1 }}
                                                         >
@@ -927,8 +927,8 @@ function PrintPageContent() {
                                                                 </>
                                                             ) : (
                                                                 <div className="w-full h-full flex items-center justify-center flex-col opacity-60">
-                                                                    <ImageIcon className={`w-8 h-8 ${activeTargetSlot?.jobId === job.id && activeTargetSlot.slotId === slot.id ? 'text-indigo-400' : 'text-gray-400'}`} />
-                                                                    <span className={`text-[10px] font-black tracking-widest mt-2 uppercase ${activeTargetSlot?.jobId === job.id && activeTargetSlot.slotId === slot.id ? 'text-indigo-600' : 'text-gray-400'}`}>Slot {idx + 1}</span>
+                                                                    <ImageIcon className={`w-8 h-8 ${activeTargetSlot?.jobId === job.id && activeTargetSlot.slotId === slot.id ? 'text-blue-400' : 'text-gray-400'}`} />
+                                                                    <span className={`text-[10px] font-black tracking-widest mt-2 uppercase ${activeTargetSlot?.jobId === job.id && activeTargetSlot.slotId === slot.id ? 'text-blue-600' : 'text-gray-400'}`}>Slot {idx + 1}</span>
                                                                 </div>
                                                             )}
                                                         </button>
@@ -957,7 +957,7 @@ function PrintPageContent() {
                                     
                                     {/* Appending New Job */}
                                     {isSelectingTemplate ? (
-                                        <div className="flex flex-col animate-in fade-in slide-in-from-bottom-8 mt-4 p-4 border-2 border-dashed border-indigo-200 rounded-xl bg-indigo-50/30">
+                                        <div className="flex flex-col animate-in fade-in slide-in-from-bottom-8 mt-4 p-4 border-2 border-dashed border-blue-200 rounded-xl bg-blue-50/30">
                                             <div className="flex items-center justify-between mb-4">
                                                 <Label className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Pilih Template Baru</Label>
                                                 <Button variant="ghost" size="sm" onClick={() => setIsSelectingTemplate(false)} className="text-gray-500 hover:text-gray-800">Batal</Button>
@@ -970,7 +970,7 @@ function PrintPageContent() {
                                                             setPrintJobs(prev => [...prev, { id: `job-${Date.now()}`, templateId: t.id, slotAssignments: {} }]); 
                                                             setIsSelectingTemplate(false); 
                                                         }}
-                                                        className={`relative rounded-xl border-2 overflow-hidden aspect-[2/3] border-gray-200 bg-white shadow-sm hover:border-indigo-400 hover:shadow-md transition-all`}
+                                                        className={`relative rounded-xl border-2 overflow-hidden aspect-[2/3] border-gray-200 bg-white shadow-sm hover:border-blue-400 hover:shadow-md transition-all`}
                                                     >
                                                         <img src={t.imageUrl} alt={t.name} className="w-full h-full object-cover" />
                                                         <div className="absolute inset-x-0 bottom-0 bg-black/70 p-2 backdrop-blur-md border-t border-white/10">
@@ -983,7 +983,7 @@ function PrintPageContent() {
                                     ) : (
                                         <Button 
                                             onClick={() => setIsSelectingTemplate(true)}
-                                            className="w-full h-14 border-2 border-dashed border-gray-300 bg-white hover:bg-gray-50 hover:border-indigo-400 text-gray-600 hover:text-indigo-600 rounded-xl transition-all font-bold text-sm flex items-center justify-center gap-2 shadow-sm"
+                                            className="w-full h-14 border-2 border-dashed border-gray-300 bg-white hover:bg-gray-50 hover:border-blue-400 text-gray-600 hover:text-blue-600 rounded-xl transition-all font-bold text-sm flex items-center justify-center gap-2 shadow-sm"
                                         >
                                             <Plus className="w-5 h-5" /> TAMBAH PRINT PAGE
                                         </Button>
@@ -1039,7 +1039,7 @@ function PrintPageContent() {
                                     step={0.1}
                                     aria-labelledby="Zoom"
                                     onChange={(e) => setZoom(Number(e.target.value))}
-                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                                 />
                             </div>
                             <div className="flex gap-3">

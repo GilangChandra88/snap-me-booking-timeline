@@ -691,19 +691,19 @@ export function TemplateMakerPage() {
             <div className="w-64 md:w-72 bg-white dark:bg-gray-900 border-r dark:border-gray-800 flex flex-col shrink-0 z-20">
                 <div className="p-4 border-b dark:border-gray-800 shrink-0">
                     <h3 className="font-bold text-gray-800 dark:text-gray-100 flex items-center">
-                        <LayoutTemplate className="w-5 h-5 mr-2 text-indigo-500" /> Projek Template
+                        <LayoutTemplate className="w-5 h-5 mr-2 text-blue-500" /> Projek Template
                     </h3>
                 </div>
                 
                 <div className="p-4 shrink-0">
-                    <Button onClick={handleCreateBlank} className="w-full h-14 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg font-bold rounded-xl flex items-center justify-center">
+                    <Button onClick={handleCreateBlank} className="w-full h-14 bg-blue-600 hover:bg-blue-700 text-white shadow-lg font-bold rounded-xl flex items-center justify-center">
                         <Plus className="w-5 h-5 mr-2" /> Buat Template 4R Kosong
                     </Button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
                     {templates.map(t => (
-                        <div key={t.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors group ${editingTemplate?.id === t.id ? 'bg-indigo-50 border-indigo-200 shadow-sm dark:bg-indigo-900/30 dark:border-indigo-800' : 'bg-white border-gray-100 hover:bg-gray-50 hover:border-gray-300 dark:bg-gray-900 dark:border-gray-800 dark:hover:bg-gray-800'}`} onClick={() => { setEditingTemplate(t); setSelectedSlotId(null); }}>
+                        <div key={t.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors group ${editingTemplate?.id === t.id ? 'bg-blue-50 border-blue-200 shadow-sm dark:bg-blue-900/30 dark:border-blue-800' : 'bg-white border-gray-100 hover:bg-gray-50 hover:border-gray-300 dark:bg-gray-900 dark:border-gray-800 dark:hover:bg-gray-800'}`} onClick={() => { setEditingTemplate(t); setSelectedSlotId(null); }}>
                             <div className="w-10 h-14 bg-gray-100 dark:bg-gray-800 rounded shrink-0 overflow-hidden shadow-inner ring-1 ring-black/5 flex items-center justify-center relative">
                                 {t.imageUrl ? (
                                     <img src={t.imageUrl} alt={t.name} className="w-full h-full object-cover" />
@@ -713,7 +713,7 @@ export function TemplateMakerPage() {
                                 <div className="absolute inset-0 bg-black/10"></div>
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-bold truncate ${editingTemplate?.id === t.id ? 'text-indigo-900 dark:text-indigo-100' : 'text-gray-700 dark:text-gray-300'}`}>{t.name}</p>
+                                <p className={`text-sm font-bold truncate ${editingTemplate?.id === t.id ? 'text-blue-900 dark:text-blue-100' : 'text-gray-700 dark:text-gray-300'}`}>{t.name}</p>
                                 <p className="text-[10px] text-gray-500 font-medium">
                                     {t.slots.length} Slot | {t.images?.length || 0} Gambar
                                 </p>
@@ -737,13 +737,13 @@ export function TemplateMakerPage() {
                     {/* Toolbar */}
                     <div className="h-14 bg-white dark:bg-gray-900 border-b dark:border-gray-800 flex items-center justify-between px-4 shrink-0 z-10 shadow-sm">
                         <div className="flex items-center gap-2 max-w-[200px] md:max-w-xs">
-                            <Input className="h-8 font-bold border-transparent hover:border-gray-200 focus:border-indigo-500 bg-transparent px-2" value={editingTemplate.name} onChange={e => setEditingTemplate({ ...editingTemplate, name: e.target.value })} placeholder="Nama Template" />
+                            <Input className="h-8 font-bold border-transparent hover:border-gray-200 focus:border-blue-500 bg-transparent px-2" value={editingTemplate.name} onChange={e => setEditingTemplate({ ...editingTemplate, name: e.target.value })} placeholder="Nama Template" />
                         </div>
                         <div className="flex items-center gap-2">
                             <Button variant="outline" size="sm" onClick={addSlot} className="h-8">
                                 <Plus className="w-4 h-4 mr-1 md:mr-2" /> <span className="hidden md:inline">Tambah Foto</span>
                             </Button>
-                            <Button size="sm" onClick={saveEditingTemplate} className="h-8 bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20">
+                            <Button size="sm" onClick={saveEditingTemplate} className="h-8 bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/20">
                                 <Save className="w-4 h-4 mr-1 md:mr-2" /> <span className="hidden md:inline">Simpan Perubahan</span>
                             </Button>
                         </div>
@@ -884,7 +884,7 @@ export function TemplateMakerPage() {
                                         checked={activeSlot.lockRatio || false}
                                         onClick={pushHistory}
                                         onChange={(e) => updateSlot(activeSlot.id, { lockRatio: e.target.checked })}
-                                        className="w-4 h-4 text-indigo-600 bg-white border-gray-300 rounded focus:ring-indigo-500 focus:ring-2 cursor-pointer"
+                                        className="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
                                     />
                                 </div>
                                 <Button variant="destructive" size="sm" className="w-full flex items-center justify-center font-bold" onClick={() => removeSlot(activeSlot.id)}>
@@ -960,7 +960,7 @@ export function TemplateMakerPage() {
                             
                             <div className="relative">
                                 <input type="file" accept="image/png" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleUploadCustomImage} disabled={isUploadingImage} title="Upload PNG Baru" />
-                                <Button className={`w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-10 shadow-indigo-600/20 shadow-lg pointer-events-none ${isUploadingImage ? 'opacity-50' : ''}`}>
+                                <Button className={`w-full bg-blue-600 hover:bg-blue-700 text-white font-bold h-10 shadow-blue-600/20 shadow-lg pointer-events-none ${isUploadingImage ? 'opacity-50' : ''}`}>
                                     <Upload className="w-4 h-4 mr-2" /> {isUploadingImage ? 'Mengunggah...' : 'Tambah Gambar (PNG)'}
                                 </Button>
                             </div>
@@ -970,7 +970,7 @@ export function TemplateMakerPage() {
                 </>
             ) : (
                 <div className="flex-1 flex flex-col items-center justify-center text-gray-400 bg-gray-100/50 dark:bg-gray-950/50 inset-shadow-sm">
-                    <ImageIcon className="w-24 h-24 mb-6 opacity-20 text-indigo-400" />
+                    <ImageIcon className="w-24 h-24 mb-6 opacity-20 text-blue-400" />
                     <h2 className="text-2xl font-black tracking-tight text-gray-300 dark:text-gray-700 mb-2">Workspace Kosong</h2>
                     <p className="text-sm text-gray-500 max-w-sm text-center">Pilih contoh template di perpustakaan sebelah kiri, atau buat baru dengan mengupload Frame (PNG/JPEG).</p>
                 </div>

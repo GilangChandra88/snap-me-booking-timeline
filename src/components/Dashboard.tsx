@@ -276,19 +276,19 @@ export function Dashboard() {
                     <div className="bg-white dark:bg-gray-800 p-1 rounded-lg inline-flex flex-wrap sm:flex-nowrap shadow-sm border border-gray-200 dark:border-gray-700 w-full md:w-auto">
                         <button
                             onClick={() => setFilterPeriod('today')}
-                            className={`flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-md flex items-center gap-1.5 sm:gap-2 transition-colors ${filterPeriod === 'today' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                            className={`flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-md flex items-center gap-1.5 sm:gap-2 transition-colors ${filterPeriod === 'today' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                         >
                             <CalendarIcon className="w-4 h-4" /> <span className="hidden xs:inline">Hari Ini</span>
                         </button>
                         <button
                             onClick={() => setFilterPeriod('week')}
-                            className={`flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-md flex items-center gap-1.5 sm:gap-2 transition-colors ${filterPeriod === 'week' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                            className={`flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-md flex items-center gap-1.5 sm:gap-2 transition-colors ${filterPeriod === 'week' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                         >
                             <CalendarDays className="w-4 h-4" /> <span className="hidden xs:inline">7 Hari</span>
                         </button>
                         <button
                             onClick={() => setFilterPeriod('month')}
-                            className={`flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-md flex items-center gap-1.5 sm:gap-2 transition-colors ${filterPeriod === 'month' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                            className={`flex-1 sm:flex-none justify-center px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-md flex items-center gap-1.5 sm:gap-2 transition-colors ${filterPeriod === 'month' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                         >
                             <CalendarRange className="w-4 h-4" /> <span className="hidden xs:inline">Bulan Ini</span>
                         </button>
@@ -303,7 +303,7 @@ export function Dashboard() {
                                 <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Booking</p>
                                 <p className="text-3xl font-bold text-gray-900 dark:text-gray-100 mt-1">{totalBookings}</p>
                             </div>
-                            <div className="shrink-0 w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-full flex items-center justify-center">
+                            <div className="shrink-0 w-12 h-12 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-full flex items-center justify-center">
                                 <Users className="w-6 h-6" />
                             </div>
                         </div>
@@ -329,7 +329,7 @@ export function Dashboard() {
                                 <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Distribusi Studio</p>
                                 <div className="mt-2 text-sm">
                                     <div className="flex justify-between items-center mb-1">
-                                        <span className="text-purple-600 dark:text-purple-400">Atas</span>
+                                        <span className="text-sky-600 dark:text-sky-400">Atas</span>
                                         <span className="font-semibold text-gray-700 dark:text-gray-300 ml-4">{studioAtasCount}</span>
                                     </div>
                                     <div className="flex justify-between items-center">
@@ -363,7 +363,7 @@ export function Dashboard() {
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Detail Booking ({filterPeriod === 'today' ? 'Hari Ini' : filterPeriod === 'week' ? '7 Hari' : 'Bulan Ini'})</h2>
                         <Button
                             size="sm"
-                            className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white shadow-md flex items-center gap-1.5 shrink-0"
+                            className="bg-gradient-to-r from-blue-500 to-sky-600 hover:from-blue-600 hover:to-sky-700 text-white shadow-md flex items-center gap-1.5 shrink-0"
                             onClick={() => {
                                 const today = getLocalYMD(new Date());
                                 const recommended = getNextAvailableTime('bawah', today);
@@ -397,7 +397,7 @@ export function Dashboard() {
                                             <td className="px-4 py-4 text-gray-700 dark:text-gray-300">{formatTime(b.startTime)} - {formatTime(b.startTime + b.duration)}</td>
                                             <td className="px-4 py-4 font-bold text-gray-900 dark:text-gray-100">{b.customerName}</td>
                                             <td className="px-4 py-4">
-                                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${b.studioType === 'bawah' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300' : 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/50 dark:text-cyan-300'}`}>
+                                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${b.studioType === 'bawah' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300' : 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/50 dark:text-cyan-300'}`}>
                                                     Studio {b.studioType === 'bawah' ? 'Bawah' : 'Atas'}
                                                 </span>
                                             </td>
@@ -472,7 +472,7 @@ export function Dashboard() {
                 <DialogContent className="w-[95vw] max-w-[460px] rounded-xl sm:rounded-2xl p-4 sm:p-6">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
-                            <Plus className="w-5 h-5 text-indigo-600" />
+                            <Plus className="w-5 h-5 text-blue-600" />
                             Tambah Booking Baru
                         </DialogTitle>
                     </DialogHeader>
@@ -568,7 +568,7 @@ export function Dashboard() {
                                 />
                             </div>
                         </div>
-                        <Button onClick={handleAddBooking} className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white">
+                        <Button onClick={handleAddBooking} className="w-full bg-gradient-to-r from-blue-500 to-sky-600 hover:from-blue-600 hover:to-sky-700 text-white">
                             Tambah Booking
                         </Button>
                     </div>
@@ -671,7 +671,7 @@ export function Dashboard() {
                                 <Button variant="outline" className="flex-1" onClick={() => setEditBooking(null)}>
                                     Batal
                                 </Button>
-                                <Button onClick={handleEditSave} className="flex-1 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white">
+                                <Button onClick={handleEditSave} className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white">
                                     Simpan Perubahan
                                 </Button>
                             </div>

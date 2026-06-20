@@ -7,10 +7,13 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { db } from '../lib/firebase';
-import { collection, onSnapshot, writeBatch, doc } from 'firebase/firestore';
+import { collection, onSnapshot, writeBatch, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
-import type { AppSettings } from './SettingsPage';
+import type { AppSettings, BookingPackage } from './SettingsPage';
+import { PRESET_PALETTE } from './SettingsPage';
+import { useAuth, type AttendanceRecord } from '../lib/AuthContext';
 import { normalizePhoneNumber } from '../lib/utils';
+import { createLocalFolders } from '../lib/localFolderApi';
 
 export interface Booking {
     id: string;
@@ -38,41 +41,29 @@ export const getLocalYMD = (d: Date) => {
     return `${year}-${month}-${day}`;
 };
 
-const STUDIO_BAWAH_TYPES = [
-    'Basic Putih',
-    'Basic Abu',
-    'Basic Pink',
-    'Basic Putih + Tirai Merah',
-    'Basic Abu + Tirai Merah',
-    'Basic Pink + Tirai Merah',
-];
-const STUDIO_ATAS_TYPES = [
-    'Basic Putih',
-    'Basic Putih + Tirai Hijau',
-];
-
 const MINUTES_PER_HOUR = 60;
 const PIXEL_PER_MINUTE = 4;
 const MIN_DURATION = 30;
 
-// Per-package colors for blocks
-const PACKAGE_COLORS: Record<string, { gradient: string; border: string; hover: string; textDark?: boolean }> = {
-    'Basic Putih': { gradient: 'from-blue-50 to-indigo-100', border: 'border-indigo-300', hover: 'hover:from-blue-100 hover:to-indigo-200', textDark: true },
-    'Basic Abu': { gradient: 'from-slate-500 to-slate-600', border: 'border-slate-700', hover: 'hover:from-slate-600 hover:to-slate-700' },
-    'Basic Pink': { gradient: 'from-pink-400 to-rose-500', border: 'border-rose-600', hover: 'hover:from-pink-500 hover:to-rose-600' },
-    'Basic Putih + Tirai Merah': { gradient: 'from-blue-50 to-red-400', border: 'border-red-500', hover: 'hover:from-blue-100 hover:to-red-500' },
-    'Basic Abu + Tirai Merah': { gradient: 'from-slate-500 to-red-500', border: 'border-red-600', hover: 'hover:from-slate-600 hover:to-red-600' },
-    'Basic Pink + Tirai Merah': { gradient: 'from-pink-400 to-red-500', border: 'border-red-600', hover: 'hover:from-pink-500 hover:to-red-600' },
-    'Basic Putih + Tirai Hijau': { gradient: 'from-blue-50 to-emerald-400', border: 'border-emerald-500', hover: 'hover:from-blue-100 hover:to-emerald-500' },
-};
-
-const DEFAULT_PACKAGE_COLOR = { gradient: 'from-purple-500 to-indigo-600', border: 'border-purple-700', hover: 'hover:from-purple-600 hover:to-indigo-700' };
+// Helper: get inline CSS style for a package block from PRESET_PALETTE
+function getPackageStyle(pkg: BookingPackage | undefined): {
+    background: string;
+    borderColor: string;
+    color: string;
+} {
+    const palette = pkg ? (PRESET_PALETTE[pkg.colorKey] ?? PRESET_PALETTE['sky']) : PRESET_PALETTE['sky'];
+    return {
+        background: `linear-gradient(135deg, ${palette.from}, ${palette.to})`,
+        borderColor: palette.border,
+        color: palette.text,
+    };
+}
 
 const STUDIO_COLORS = {
     bawah: {
-        light: 'bg-purple-50',
-        text: 'text-purple-700',
-        badge: 'bg-purple-100 text-purple-700'
+        light: 'bg-sky-50',
+        text: 'text-sky-700',
+        badge: 'bg-sky-100 text-sky-700'
     },
     atas: {
         light: 'bg-cyan-50',
@@ -172,7 +163,30 @@ function GoogleDriveUploader({
                 driveLink: linkData.webViewLink,
                 driveFolderId: folderId
             } : null);
-            alert(`Folder berhasil dibuat untuk ${booking.customerName}!`);
+
+            // === BUAT FOLDER LOKAL DI 2 LOKASI (via server lokal) ===
+            const localBases = [
+                appSettings.localPhotoFolder?.trim(),
+                appSettings.localPhotoFolder2?.trim(),
+            ].filter(Boolean) as string[];
+
+            if (localBases.length > 0) {
+                try {
+                    const results = await createLocalFolders(localBases, folderName);
+                    const lines = results.map(r => {
+                        if (r.status === 'created') return `✅ ${r.path}`;
+                        if (r.status === 'exists')  return `⚠️ Sudah ada: ${r.path}`;
+                        return `❌ Gagal: ${r.path}\n   ${r.message}`;
+                    });
+                    alert(`✅ Folder Drive berhasil dibuat!\n\n📁 Folder Lokal:\n${lines.join('\n')}`);
+                } catch (fsErr) {
+                    // Server lokal tidak aktif — tetap tampilkan sukses Drive
+                    alert(`✅ Folder Drive berhasil dibuat untuk ${booking.customerName}!\n⚠️ Folder lokal tidak dibuat (pastikan server lokal berjalan: npm run server)`);
+                    console.warn('Server lokal tidak tersedia:', fsErr);
+                }
+            } else {
+                alert(`Folder berhasil dibuat untuk ${booking.customerName}!`);
+            }
 
         } catch (error) {
             console.error(error);
@@ -279,18 +293,23 @@ function GoogleDriveUploader({
 export function TimelineStudio() {
     const [allBookings, setAllBookings] = useState<Booking[]>([]);
     const [selectedDate] = useState(() => getLocalYMD(new Date()));
+    const { profile } = useAuth();
+    
+    // States
+    const [currentTime, setCurrentTime] = useState(new Date());
+    const [activeAttendances, setActiveAttendances] = useState<AttendanceRecord[]>([]);
+    const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+    const [selectedStudio, setSelectedStudio] = useState<'bawah' | 'atas'>('bawah');
+    const [draggedBooking, setDraggedBooking] = useState<{ id: string; offsetX: number; startX: number; startY: number } | null>(null);
+    const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+    const [selectedBookingIds, setSelectedBookingIds] = useState<Set<string>>(new Set());
 
     // Derived state for the currently selected date
     const bookings = useMemo<Booking[]>(() => {
         const todayStr = getLocalYMD(new Date());
         return allBookings.filter(b => (b.date || todayStr) === selectedDate);
     }, [allBookings, selectedDate]);
-    const [currentTime, setCurrentTime] = useState(new Date());
-    const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-    const [selectedStudio, setSelectedStudio] = useState<'bawah' | 'atas'>('bawah');
-    const [draggedBooking, setDraggedBooking] = useState<{ id: string; offsetX: number; startX: number; startY: number } | null>(null);
-    const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
-    const [selectedBookingIds, setSelectedBookingIds] = useState<Set<string>>(new Set());
+    
     const [transferMode, setTransferMode] = useState(false);
     const [transferPackage, setTransferPackage] = useState('');
     const [dropTransferPackages, setDropTransferPackages] = useState<Record<string, string>>({});
@@ -349,8 +368,11 @@ export function TimelineStudio() {
         setGoogleTokenState(token);
         if (token) {
             sessionStorage.setItem('googleToken', token);
+            // Simpan waktu login untuk tracking expired
+            sessionStorage.setItem('googleTokenTime', String(Date.now()));
         } else {
             sessionStorage.removeItem('googleToken');
+            sessionStorage.removeItem('googleTokenTime');
         }
     };
 
@@ -361,6 +383,22 @@ export function TimelineStudio() {
         });
         return () => unsub();
     }, []);
+
+    // Derived package lists from dynamic settings
+    const studioBawahPackages = useMemo(
+        () => (appSettings?.packages ?? []).filter(p => p.availableIn.includes('bawah')),
+        [appSettings]
+    );
+    const studioAtasPackages = useMemo(
+        () => (appSettings?.packages ?? []).filter(p => p.availableIn.includes('atas')),
+        [appSettings]
+    );
+    // Map: packageName → BookingPackage (for quick color lookup)
+    const allPackageMap = useMemo(() => {
+        const map = new Map<string, BookingPackage>();
+        (appSettings?.packages ?? []).forEach(p => map.set(p.name, p));
+        return map;
+    }, [appSettings]);
 
     // Form state
     const [formData, setFormData] = useState({
@@ -379,9 +417,9 @@ export function TimelineStudio() {
         return () => clearInterval(timer);
     }, []);
 
-    // Firebase: Listen for real-time updates
+    // Firebase: Listen for real-time updates (bookings & attendance)
     useEffect(() => {
-        const unsubscribe = onSnapshot(collection(db, 'bookings'), (snapshot) => {
+        const unsubscribeBookings = onSnapshot(collection(db, 'bookings'), (snapshot) => {
             if (firebaseWriteRef.current) {
                 firebaseWriteRef.current = false;
                 return;
@@ -390,12 +428,50 @@ export function TimelineStudio() {
             snapshot.forEach(docSnap => {
                 loadedBookings.push(docSnap.data() as Booking);
             });
-            
             setAllBookings(loadedBookings);
             allBookingsRef.current = loadedBookings;
         });
-        return () => unsubscribe();
+
+        const unsubscribeAttendance = onSnapshot(collection(db, 'attendance'), (snap) => {
+            const todayStr = getLocalYMD(new Date());
+            const list: AttendanceRecord[] = [];
+            snap.forEach(d => {
+                const rec = d.data() as AttendanceRecord;
+                if (rec.date === todayStr && rec.checkOutTime === null) {
+                    list.push(rec);
+                }
+            });
+            setActiveAttendances(list);
+        });
+
+        return () => { unsubscribeBookings(); unsubscribeAttendance(); };
     }, []);
+
+    const handleCheckIn = async () => {
+        if (!profile) return;
+        const id = `att-${Date.now()}`;
+        const newRecord: AttendanceRecord = {
+            id,
+            staffUid: profile.uid,
+            staffName: profile.displayName,
+            date: getLocalYMD(new Date()),
+            checkInTime: Date.now(),
+            checkOutTime: null,
+            totalMinutes: 0
+        };
+        await setDoc(doc(db, 'attendance', id), newRecord);
+    };
+
+    const handleCheckOut = async (recordId: string, checkInTime: number) => {
+        if (!confirm('Akhiri sesi kerja (Check-out) sekarang?')) return;
+        const outTime = Date.now();
+        const diffMs = Math.max(0, outTime - checkInTime);
+        const mins = Math.floor(diffMs / 60000);
+        await updateDoc(doc(db, 'attendance', recordId), {
+            checkOutTime: outTime,
+            totalMinutes: mins
+        });
+    };
 
     // Save ONLY CHANGED bookings to Firebase
     const saveToFirebase = useCallback(async (newBookings: Booking[], oldBookings: Booking[]) => {
@@ -467,7 +543,11 @@ export function TimelineStudio() {
     // Ctrl+Z keyboard shortcut for undo
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                const target = e.target as HTMLElement;
+                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+                    return; // native undo for inputs
+                }
                 e.preventDefault();
                 undo();
             }
@@ -677,10 +757,11 @@ export function TimelineStudio() {
         const newStudio: 'bawah' | 'atas' = booking.studioType === 'bawah' ? 'atas' : 'bawah';
 
         let finalPackage = newPackage;
-        // Jika paketnya Basic Putih dan tersedia di kedua studio, langsung pakai paket yang sama tanpa konfirmasi
-        if (!finalPackage && booking.bookingType === 'Basic Putih') {
-            const targetTypes = newStudio === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES;
-            if (targetTypes.includes('Basic Putih')) {
+        // Jika paket saat ini tersedia di studio tujuan juga, langsung pakai tanpa konfirmasi
+        if (!finalPackage) {
+            const targetPkgs = newStudio === 'bawah' ? studioBawahPackages : studioAtasPackages;
+            const currentPkgAvailableInTarget = targetPkgs.find(p => p.name === booking.bookingType);
+            if (currentPkgAvailableInTarget) {
                 finalPackage = booking.bookingType;
             }
         }
@@ -903,15 +984,16 @@ export function TimelineStudio() {
                         ? movedIdsArray.filter(id => (dragOriginalBookingsRef.current || []).some(b => b.id === id && b.studioType === draggedStudio))
                         : movedIdsArray;
 
-                    // Cek apakah semua booking yang dipindah adalah Basic Putih dan paket itu tersedia di studio tujuan
+                    // Cek apakah semua booking yang dipindah punya paket yang tersedia di studio tujuan
                     const movedBookings = allBookingsRef.current.filter(b => transferIds.includes(b.id));
-                    const targetTypes = targetStudio === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES;
-                    const canAutoTransferBasicPutih =
+                    const targetPkgNames = new Set(
+                        (targetStudio === 'bawah' ? studioBawahPackages : studioAtasPackages).map(p => p.name)
+                    );
+                    const canAutoTransfer =
                         movedBookings.length > 0 &&
-                        movedBookings.every(b => b.bookingType === 'Basic Putih') &&
-                        targetTypes.includes('Basic Putih');
+                        movedBookings.every(b => targetPkgNames.has(b.bookingType));
 
-                    if (canAutoTransferBasicPutih) {
+                    if (canAutoTransfer) {
                         // Sudah tersimulasikan di allBookingsRef.current, cukup resolve collision dan simpan
                         const resolved = resolveCollisions(allBookingsRef.current, new Set(transferIds));
                         updateBookings(resolved);
@@ -999,7 +1081,7 @@ export function TimelineStudio() {
     // Dark mode theme classes
     const dm = {
         root: darkMode ? 'bg-gray-950 text-gray-100' : 'bg-white text-gray-900',
-        topSection: darkMode ? 'bg-gradient-to-br from-gray-900 via-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-slate-50 via-blue-50/30 to-purple-50/30 border-gray-200',
+        topSection: darkMode ? 'bg-gradient-to-br from-gray-900 via-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-slate-50 via-blue-50/30 to-sky-50/30 border-gray-200',
         timerCard: darkMode ? 'bg-gray-800 border-gray-600' : 'bg-white',
         timerName: darkMode ? 'text-gray-100' : 'text-gray-800',
         timerSub: darkMode ? 'text-gray-400' : 'text-gray-500',
@@ -1056,11 +1138,12 @@ export function TimelineStudio() {
     const renderBookingBlock = (booking: Booking) => {
         const left = booking.startTime * PIXEL_PER_MINUTE;
         const width = booking.duration * PIXEL_PER_MINUTE;
-        const pkgColors = PACKAGE_COLORS[booking.bookingType] || DEFAULT_PACKAGE_COLOR;
+        const pkgStyle = getPackageStyle(allPackageMap.get(booking.bookingType));
         const isDragging = draggedBooking?.id === booking.id;
         const isNarrow = booking.duration <= 45;
-        const hasTirai = booking.bookingType.includes('Tirai');
-        const isDarkText = pkgColors.textDark === true;
+        const hasTirai = booking.bookingType.toLowerCase().includes('tirai');
+        // Determine text contrast: if color is light (amber), use dark text
+        const isDarkText = (allPackageMap.get(booking.bookingType)?.colorKey ?? '') === 'amber';
         const textBase = isDarkText ? 'text-gray-800' : 'text-white';
         const textSub = isDarkText ? 'text-gray-600' : 'text-white/90';
 
@@ -1117,8 +1200,9 @@ export function TimelineStudio() {
             >
                 {/* Main content area */}
                 <div
-                    className={`flex-1 bg-gradient-to-br ${pkgColors.gradient} ${pkgColors.hover} rounded-t-lg ${isNarrow ? 'px-2 py-1.5' : 'px-3 py-1.5'} flex items-center justify-between border-x-2 border-t-2 ${pkgColors.border} shadow-lg transition-all duration-200 hover:shadow-xl relative overflow-hidden ${isDragging ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab'} ${isOverdueNotArrived ? 'opacity-50 grayscale' : ''} ${selectedBookingIds.has(booking.id) ? 'ring-4 ring-inset ring-blue-500 border-blue-400' : ''}`}
+                    className={`flex-1 rounded-t-lg ${isNarrow ? 'px-2 py-1.5' : 'px-3 py-1.5'} flex items-center justify-between border-x-2 border-t-2 shadow-lg transition-all duration-200 hover:shadow-xl relative overflow-hidden ${isDragging ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab'} ${isOverdueNotArrived ? 'opacity-50 grayscale' : ''} ${selectedBookingIds.has(booking.id) ? 'ring-4 ring-inset ring-blue-500' : ''}`}
                     style={{
+                        ...pkgStyle,
                         touchAction: 'none',
                         WebkitUserSelect: 'none',
                         userSelect: 'none',
@@ -1177,9 +1261,10 @@ export function TimelineStudio() {
                 <button
                     className={`w-full h-[18px] flex items-center justify-center gap-1 text-[9px] font-bold rounded-b-lg border-x-2 border-b-2 transition-colors ${
                         booking.arrived
-                            ? `${pkgColors.border} bg-emerald-500/80 hover:bg-emerald-500 text-white`
-                            : `${pkgColors.border} bg-amber-400/80 hover:bg-amber-400 text-amber-900`
+                            ? 'bg-emerald-500/80 hover:bg-emerald-500 text-white'
+                            : 'bg-amber-400/80 hover:bg-amber-400 text-amber-900'
                     } ${selectedBookingIds.has(booking.id) ? 'border-blue-400' : ''}`}
+                    style={{ borderColor: selectedBookingIds.has(booking.id) ? undefined : pkgStyle.borderColor }}
                     onClick={(e) => {
                         e.stopPropagation();
                         toggleArrived(booking.id);
@@ -1202,12 +1287,13 @@ export function TimelineStudio() {
         const minutes = Math.floor((remainingTotalSeconds % 3600) / 60);
         const seconds = remainingTotalSeconds % 60;
         const studioColors = STUDIO_COLORS[booking.studioType];
-        const pkgColors = PACKAGE_COLORS[booking.bookingType] || DEFAULT_PACKAGE_COLOR;
+        const pkgStyle = getPackageStyle(allPackageMap.get(booking.bookingType));
 
         return (
             <div
                 key={booking.id}
-                className={`${dm.timerCard} rounded-xl shadow-2xl p-5 border-2 ${pkgColors.border} min-w-[240px] backdrop-blur-sm transform hover:scale-105 transition-transform duration-200`}
+                className={`${dm.timerCard} rounded-xl shadow-2xl p-5 border-2 min-w-[240px] backdrop-blur-sm transform hover:scale-105 transition-transform duration-200`}
+                style={{ borderColor: pkgStyle.borderColor }}
             >
                 <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
@@ -1228,7 +1314,7 @@ export function TimelineStudio() {
                     <p className={`text-sm ${dm.timerSub}`}>{booking.bookingType}</p>
                 </div>
 
-                <div className={`bg-gradient-to-br ${pkgColors.gradient} rounded-lg p-3 text-white shadow-inner`}>
+                <div className="rounded-lg p-3 text-white shadow-inner" style={pkgStyle}>
                     <div className="flex items-center gap-2 mb-1">
                         <Clock className="w-4 h-4" />
                         <p className="text-xs font-medium opacity-90">Waktu Tersisa</p>
@@ -1283,7 +1369,7 @@ export function TimelineStudio() {
                         return (
                             <div className={`flex-shrink-0 w-full lg:w-[320px] ${dm.recapPanel} rounded-xl border p-4 shadow-sm z-10 relative`}>
                                 <div className="flex items-center gap-2 mb-3">
-                                    <div className="p-1.5 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg">
+                                    <div className="p-1.5 bg-gradient-to-br from-blue-500 to-sky-600 rounded-lg">
                                         <Camera className="w-4 h-4 text-white" />
                                     </div>
                                     <h3 className={`text-sm font-bold ${dm.recapTitle}`}>Rekap Hari Ini</h3>
@@ -1293,9 +1379,9 @@ export function TimelineStudio() {
                                 </div>
 
                                 <div className="grid grid-cols-4 gap-2 mb-3">
-                                    <div className="bg-indigo-50 rounded-lg p-2 text-center">
-                                        <p className="text-2xl font-bold text-indigo-600">{totalBookings}</p>
-                                        <p className="text-[9px] text-indigo-500 font-semibold uppercase">Total</p>
+                                    <div className="bg-blue-50 rounded-lg p-2 text-center">
+                                        <p className="text-2xl font-bold text-blue-600">{totalBookings}</p>
+                                        <p className="text-[9px] text-blue-500 font-semibold uppercase">Total</p>
                                     </div>
                                     <div className="bg-emerald-50 rounded-lg p-2 text-center">
                                         <p className="text-2xl font-bold text-emerald-600">{completedBookings}</p>
@@ -1314,7 +1400,7 @@ export function TimelineStudio() {
                                 <div className="space-y-1.5">
                                     <div className="flex items-center justify-between text-xs">
                                         <span className={dm.recapLabel}>Studio Bawah</span>
-                                        <span className="font-bold text-purple-600">{studioBawahCount} booking</span>
+                                        <span className="font-bold text-sky-600">{studioBawahCount} booking</span>
                                     </div>
                                     <div className="flex items-center justify-between text-xs">
                                         <span className={dm.recapLabel}>Studio Atas</span>
@@ -1333,6 +1419,46 @@ export function TimelineStudio() {
                                 </div>
                             </div>
                         );
+                    })()}
+                </div>
+            </div>
+
+            {/* ── SISTEM ABSENSI ── */}
+            <div className={`${dm.timeBar} flex-shrink-0 border-b px-4 md:px-8 py-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-sky-50/50`}>
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-sky-100 text-sky-600 rounded-lg shadow-sm">
+                        <User className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <h3 className={`text-sm font-bold ${dm.timeBarText}`}>Status Berjaga</h3>
+                        <p className={`text-xs ${dm.timeDate}`}>
+                            {activeAttendances.length === 0 ? 'Belum ada staf yang sedang check-in' : 'Staf berjaga: '} 
+                            <span className="font-semibold text-sky-600 ml-1">
+                                {activeAttendances.map(a => a.staffName).join(', ')}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+                
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    {(() => {
+                        if (!profile || profile.role === 'owner' || profile.role === 'admin') return null;
+                        
+                        const myRecord = activeAttendances.find(a => a.staffUid === profile.uid);
+                        
+                        if (myRecord) {
+                            return (
+                                <Button size="sm" variant="destructive" className="w-full md:w-auto shadow-sm" onClick={() => handleCheckOut(myRecord.id, myRecord.checkInTime)}>
+                                    Check-out
+                                </Button>
+                            );
+                        } else {
+                            return (
+                                <Button size="sm" className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm" onClick={handleCheckIn}>
+                                    Check-in Sekarang
+                                </Button>
+                            );
+                        }
                     })()}
                 </div>
             </div>
@@ -1438,7 +1564,7 @@ export function TimelineStudio() {
                                         onClick={() => {
                                             setSelectedStudio('atas');
                                             const recommended = getNextAvailableTime('atas');
-                                            setFormData({ ...formData, bookingType: STUDIO_ATAS_TYPES[0], startHour: recommended.hour, startMinute: recommended.minute });
+                                            setFormData({ ...formData, bookingType: studioAtasPackages[0]?.name ?? '', startHour: recommended.hour, startMinute: recommended.minute });
                                         }}
                                     >
                                         <Plus className="w-4 h-4 mr-2" />
@@ -1481,8 +1607,15 @@ export function TimelineStudio() {
                                                     <SelectValue placeholder="Pilih jenis" />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {STUDIO_ATAS_TYPES.map(type => (
-                                                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                                                    {studioAtasPackages.length === 0 ? (
+                                                        <SelectItem value="__none" disabled>Belum ada paket untuk Studio Atas</SelectItem>
+                                                    ) : studioAtasPackages.map(pkg => (
+                                                        <SelectItem key={pkg.id} value={pkg.name}>
+                                                            <span className="flex items-center gap-2">
+                                                                <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: `linear-gradient(135deg, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).from}, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).to})` }} />
+                                                                {pkg.name}
+                                                            </span>
+                                                        </SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -1567,7 +1700,7 @@ export function TimelineStudio() {
                         <div className="flex-shrink-0 w-full xl:w-64">
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg shadow-md">
+                                    <div className="p-2 bg-gradient-to-br from-sky-500 to-blue-600 rounded-lg shadow-md">
                                         <Camera className="w-5 h-5 text-white" />
                                     </div>
                                     <div>
@@ -1583,11 +1716,11 @@ export function TimelineStudio() {
                                 <DialogTrigger asChild>
                                     <Button
                                         size="sm"
-                                        className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 shadow-md"
+                                        className="w-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 shadow-md"
                                         onClick={() => {
                                             setSelectedStudio('bawah');
                                             const recommended = getNextAvailableTime('bawah');
-                                            setFormData({ ...formData, bookingType: STUDIO_BAWAH_TYPES[0], startHour: recommended.hour, startMinute: recommended.minute });
+                                            setFormData({ ...formData, bookingType: studioBawahPackages[0]?.name ?? '', startHour: recommended.hour, startMinute: recommended.minute });
                                         }}
                                     >
                                         <Plus className="w-4 h-4 mr-2" />
@@ -1597,7 +1730,7 @@ export function TimelineStudio() {
                                 <DialogContent className="sm:max-w-[425px]">
                                     <DialogHeader>
                                         <DialogTitle className="flex items-center gap-2">
-                                            <Camera className="w-5 h-5 text-purple-600" />
+                                            <Camera className="w-5 h-5 text-sky-600" />
                                             Tambah Booking - Studio Bawah
                                         </DialogTitle>
                                     </DialogHeader>
@@ -1630,8 +1763,15 @@ export function TimelineStudio() {
                                                     <SelectValue placeholder="Pilih jenis" />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {STUDIO_BAWAH_TYPES.map(type => (
-                                                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                                                    {studioBawahPackages.length === 0 ? (
+                                                        <SelectItem value="__none" disabled>Belum ada paket untuk Studio Bawah</SelectItem>
+                                                    ) : studioBawahPackages.map(pkg => (
+                                                        <SelectItem key={pkg.id} value={pkg.name}>
+                                                            <span className="flex items-center gap-2">
+                                                                <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: `linear-gradient(135deg, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).from}, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).to})` }} />
+                                                                {pkg.name}
+                                                            </span>
+                                                        </SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -1664,7 +1804,7 @@ export function TimelineStudio() {
                                                 </Select>
                                             </div>
                                         </div>
-                                        <Button onClick={addBooking} className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700">
+                                        <Button onClick={addBooking} className="w-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700">
                                             Tambah Booking
                                         </Button>
                                     </div>
@@ -1770,12 +1910,12 @@ export function TimelineStudio() {
             <Dialog open={!!selectedBooking} onOpenChange={(open) => { if (!open) { setSelectedBooking(null); setTransferMode(false); setTransferPackage(''); } }}>
                 <DialogContent className="w-[95vw] max-w-[420px] rounded-xl sm:rounded-2xl p-4 sm:p-6 overflow-y-auto max-h-[90vh]">
                     {selectedBooking && (() => {
-                        const pkg = PACKAGE_COLORS[selectedBooking.bookingType] || DEFAULT_PACKAGE_COLOR;
+                        const pkgStyle = getPackageStyle(allPackageMap.get(selectedBooking.bookingType));
                         const timeStr = `${Math.floor(selectedBooking.startTime / 60).toString().padStart(2, '0')}:${(selectedBooking.startTime % 60).toString().padStart(2, '0')}`;
                         const endTime = selectedBooking.startTime + selectedBooking.duration;
                         const endTimeStr = `${Math.floor(endTime / 60).toString().padStart(2, '0')}:${(endTime % 60).toString().padStart(2, '0')}`;
                         const destStudio = selectedBooking.studioType === 'bawah' ? 'atas' : 'bawah';
-                        const destTypes = destStudio === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES;
+                        const destPkgs = destStudio === 'bawah' ? studioBawahPackages : studioAtasPackages;
                         return (
                             <>
                                 <DialogHeader>
@@ -1785,11 +1925,21 @@ export function TimelineStudio() {
                                     </DialogTitle>
                                 </DialogHeader>
                                 <div className="space-y-3 sm:space-y-4 py-2">
-                                    <div className={`bg-gradient-to-br ${pkg.gradient} rounded-lg p-3 sm:p-4 ${pkg.textDark ? 'text-gray-800' : 'text-white'} shadow-md`}>
+                                    <div className="rounded-lg p-3 sm:p-4 shadow-md" style={pkgStyle}>
                                         <div className="flex justify-between items-start gap-2">
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-base sm:text-lg font-bold truncate">{selectedBooking.customerName}</p>
-                                                <p className="text-xs sm:text-sm opacity-90 truncate">{selectedBooking.bookingType}</p>
+                                            <div className="flex-1 min-w-0 font-bold group">
+                                                <input 
+                                                    className="w-full bg-transparent border-b border-transparent hover:border-current focus:border-current outline-none text-base sm:text-lg font-bold truncate transition-colors placeholder:text-current placeholder:opacity-50 pb-0.5"
+                                                    value={selectedBooking.customerName}
+                                                    onChange={(e) => {
+                                                        const newName = e.target.value;
+                                                        const updatedBookings = bookings.map(b => b.id === selectedBooking.id ? { ...b, customerName: newName } : b);
+                                                        updateBookings(updatedBookings, true);
+                                                        setSelectedBooking(prev => prev ? { ...prev, customerName: newName } : null);
+                                                    }}
+                                                    placeholder="Nama Customer"
+                                                />
+                                                <p className="text-xs sm:text-sm opacity-90 truncate font-normal mt-0.5">{selectedBooking.bookingType}</p>
                                             </div>
                                         </div>
                                     </div>
@@ -1828,8 +1978,13 @@ export function TimelineStudio() {
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {(selectedBooking.studioType === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES).map(type => (
-                                                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                                                    {(selectedBooking.studioType === 'bawah' ? studioBawahPackages : studioAtasPackages).map(pkg => (
+                                                        <SelectItem key={pkg.id} value={pkg.name}>
+                                                            <span className="flex items-center gap-2">
+                                                                <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: `linear-gradient(135deg, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).from}, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).to})` }} />
+                                                                {pkg.name}
+                                                            </span>
+                                                        </SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -1860,7 +2015,7 @@ export function TimelineStudio() {
                                         <span className="text-xs opacity-70 font-normal">(klik untuk ubah)</span>
                                     </button>
 
-                                    {/* Google Drive Integration */}
+                                    {/* Google Drive Integration — GoogleOAuthProvider selalu aktif */}
                                     {appSettings?.googleClientId && appSettings?.googleDriveFolderId && (
                                         <GoogleOAuthProvider clientId={appSettings.googleClientId}>
                                             <GoogleDriveUploader 
@@ -1879,8 +2034,54 @@ export function TimelineStudio() {
                                     <div className="flex flex-col sm:flex-row gap-2 mt-3">
                                         <Button
                                             className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white text-xs sm:text-sm h-9 sm:h-10"
-                                            onClick={() => {
+                                            onClick={async () => {
                                                 moveToCurrentTime(selectedBooking.id);
+                                                // Auto-create folder drive saat waktu dimulai (Mulai Sekarang)
+                                                if (!selectedBooking.driveLink && googleToken && appSettings?.googleDriveFolderId) {
+                                                    try {
+                                                        const folderName = `${selectedBooking.customerName} - ${getLocalYMD(new Date())}`;
+                                                        const metadata = {
+                                                            name: folderName,
+                                                            mimeType: 'application/vnd.google-apps.folder',
+                                                            parents: [appSettings.googleDriveFolderId.trim()]
+                                                        };
+                                                        
+                                                        const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+                                                            method: 'POST',
+                                                            headers: {
+                                                                Authorization: `Bearer ${googleToken}`,
+                                                                'Content-Type': 'application/json',
+                                                            },
+                                                            body: JSON.stringify(metadata)
+                                                        });
+                                                        
+                                                        if (response.ok) {
+                                                            const data = await response.json();
+                                                            const folderId = data.id;
+                                                            const linkResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=webViewLink`, {
+                                                                method: 'GET',
+                                                                headers: { Authorization: `Bearer ${googleToken}` }
+                                                            });
+                                                            const linkData = await linkResponse.json();
+                                                            
+                                                            const batch = writeBatch(db);
+                                                            batch.update(doc(db, 'bookings', selectedBooking.id), { 
+                                                                driveLink: linkData.webViewLink,
+                                                                driveFolderId: folderId
+                                                            });
+                                                            await batch.commit();
+
+                                                            // Also update local state
+                                                            setSelectedBooking(prev => prev ? { 
+                                                                ...prev, 
+                                                                driveLink: linkData.webViewLink,
+                                                                driveFolderId: folderId
+                                                            } : null);
+                                                        }
+                                                    } catch (e) {
+                                                        console.error('Gagal auto-create folder:', e);
+                                                    }
+                                                }
                                             }}
                                         >
                                             <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
@@ -1890,13 +2091,11 @@ export function TimelineStudio() {
                                             variant="outline"
                                             className="flex-1 text-xs sm:text-sm h-9 sm:h-10"
                                             onClick={() => {
-                                                // Jika paket Basic Putih tersedia di kedua studio, langsung pindah tanpa konfirmasi paket
-                                                if (selectedBooking.bookingType === 'Basic Putih') {
-                                                    const targetTypes = destStudio === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES;
-                                                    if (targetTypes.includes('Basic Putih')) {
-                                                        transferStudio(selectedBooking.id);
-                                                        return;
-                                                    }
+                                                // Jika paket saat ini tersedia di studio tujuan juga, langsung pindah tanpa konfirmasi
+                                                const targetPkgNames = new Set(destPkgs.map(p => p.name));
+                                                if (targetPkgNames.has(selectedBooking.bookingType)) {
+                                                    transferStudio(selectedBooking.id);
+                                                    return;
                                                 }
                                                 setTransferMode(!transferMode);
                                                 setTransferPackage('');
@@ -1916,8 +2115,13 @@ export function TimelineStudio() {
                                                     <SelectValue placeholder="Pilih paket..." />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {destTypes.map(type => (
-                                                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                                                    {destPkgs.map(pkg => (
+                                                        <SelectItem key={pkg.id} value={pkg.name}>
+                                                            <span className="flex items-center gap-2">
+                                                                <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: `linear-gradient(135deg, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).from}, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).to})` }} />
+                                                                {pkg.name}
+                                                            </span>
+                                                        </SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -1989,8 +2193,13 @@ export function TimelineStudio() {
                                                 <SelectValue placeholder="Pilih Paket Baru..." />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {(dropTransferData?.targetStudio === 'bawah' ? STUDIO_BAWAH_TYPES : STUDIO_ATAS_TYPES).map(type => (
-                                                    <SelectItem key={type} value={type} className="text-xs">{type}</SelectItem>
+                                                {(dropTransferData?.targetStudio === 'bawah' ? studioBawahPackages : studioAtasPackages).map(pkg => (
+                                                    <SelectItem key={pkg.id} value={pkg.name} className="text-xs">
+                                                        <span className="flex items-center gap-2">
+                                                            <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: `linear-gradient(135deg, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).from}, ${(PRESET_PALETTE[pkg.colorKey] || PRESET_PALETTE['sky']).to})` }} />
+                                                            {pkg.name}
+                                                        </span>
+                                                    </SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>

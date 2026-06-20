@@ -240,7 +240,7 @@ const ManualDriveCreator = ({
         <Button 
           onClick={() => void handleManualCreateDriveFolder()}
           disabled={isCreatingFolderManual}
-          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
         >
           <FolderPlus className="w-4 h-4 mr-2" /> 
           {isCreatingFolderManual ? 'Membuat Folder...' : 'Buat Folder Kasar (Manual)'}

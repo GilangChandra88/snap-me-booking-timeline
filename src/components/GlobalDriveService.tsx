@@ -4,6 +4,7 @@ import { collection, onSnapshot, doc, writeBatch } from 'firebase/firestore';
 import { toast } from 'sonner';
 import type { Booking } from './TimelineStudio';
 import type { AppSettings } from './SettingsPage';
+import { createLocalFolders } from '../lib/localFolderApi';
 
 const getLocalYMD = (d: Date) => {
   const y = d.getFullYear();
@@ -12,22 +13,7 @@ const getLocalYMD = (d: Date) => {
   return `${y}-${m}-${dd}`;
 };
 
-const getLocalDayStart = (ymd: string) => {
-  const [yy, mm, dd] = ymd.split('-').map((x) => parseInt(x, 10));
-  return new Date(yy, (mm || 1) - 1, dd || 1, 0, 0, 0, 0);
-};
 
-const getBookingEndMs = (b: Booking, fallbackYmd: string) => {
-  const ymd = b.date || fallbackYmd;
-  const dayStart = getLocalDayStart(ymd).getTime();
-  const endMinutes = b.startTime + b.duration;
-  return dayStart + endMinutes * 60_000;
-};
-
-const isBookingCompleted = (b: Booking, nowMs: number, fallbackYmd: string) => {
-  if (!b.arrived) return false;
-  return nowMs >= getBookingEndMs(b, fallbackYmd);
-};
 
 export function GlobalDriveService() {
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -71,14 +57,12 @@ export function GlobalDriveService() {
 
         const now = new Date();
         const todayStr = getLocalYMD(now);
-        const nowMs = now.getTime();
 
-        // Find all completed bookings without a folder (and without invoice!)
-        // Also skip bookings that are currently being processed
-        const targets = bookings.filter(b => 
-          isBookingCompleted(b, nowMs, todayStr) && 
-          !b.driveLink && 
-          !b.invoiceId &&
+        // Buat folder segera saat booking DIMULAI (arrived=true) dan belum punya folder
+        const targets = bookings.filter(b =>
+          b.arrived &&           // sudah klik "Mulai Sekarang"
+          !b.driveLink &&        // belum punya folder Drive
+          !b.invoiceId &&        // belum di-invoice
           !pendingIds.current.has(b.id)
         );
 
@@ -188,6 +172,29 @@ export function GlobalDriveService() {
                toast.success(`✅ Folder Drive dibuat`, {
                  description: `${b.customerName} — ${b.date || todayStr}`,
                });
+
+               // === BUAT FOLDER LOKAL DI 2 LOKASI (via server lokal) ===
+               const localBases = [
+                 appSettings?.localPhotoFolder?.trim(),
+                 appSettings?.localPhotoFolder2?.trim(),
+               ].filter(Boolean) as string[];
+
+               if (localBases.length > 0) {
+                 createLocalFolders(localBases, folderName)
+                   .then(results => {
+                     results.forEach(r => {
+                       if (r.status === 'created') {
+                         toast.success(`📁 Folder lokal dibuat`, { description: r.path });
+                       } else if (r.status === 'error') {
+                         toast.warning(`⚠️ Gagal buat folder lokal`, { description: r.message });
+                       }
+                     });
+                   })
+                   .catch(() => {
+                     // Server lokal tidak aktif — jangan ganggu flow utama
+                     console.warn('Server lokal tidak tersedia, folder lokal tidak dibuat.');
+                   });
+               }
             }
 
           } catch (e) {
