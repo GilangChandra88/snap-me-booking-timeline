@@ -32,6 +32,14 @@ export interface Booking {
     isTransactionFinished?: boolean; // set when Kasir completely finished the workflow
     waSent?: boolean; // true when Drive link WA message has been sent
     reviewSent?: boolean; // true when review/masukan WA message has been sent
+    
+    // DP & Verification fields
+    dpStatus?: 'pending' | 'verified' | 'cancelled';
+    dpRequestedAt?: number; // timestamp when DP is requested (booking created)
+    dpVerifiedAt?: number; // timestamp when DP is verified
+    dpVerifiedBy?: string; // admin name who verified the DP
+    deletedAt?: number; // timestamp when soft-deleted
+    cancelReason?: string; // e.g. 'dp_timeout', 'manual'
 }
 
 export const getLocalYMD = (d: Date) => {
@@ -426,7 +434,11 @@ export function TimelineStudio() {
             }
             const loadedBookings: Booking[] = [];
             snapshot.forEach(docSnap => {
-                loadedBookings.push(docSnap.data() as Booking);
+                const b = docSnap.data() as Booking;
+                b.id = b.id || docSnap.id;
+                if (!b.deletedAt) {
+                    loadedBookings.push(b);
+                }
             });
             setAllBookings(loadedBookings);
             allBookingsRef.current = loadedBookings;
@@ -1142,10 +1154,12 @@ export function TimelineStudio() {
         const isDragging = draggedBooking?.id === booking.id;
         const isNarrow = booking.duration <= 45;
         const hasTirai = booking.bookingType.toLowerCase().includes('tirai');
-        // Determine text contrast: if color is light (amber), use dark text
-        const isDarkText = (allPackageMap.get(booking.bookingType)?.colorKey ?? '') === 'amber';
+        // Determine text contrast from palette.text (supports white, amber, and any future light colors)
+        const pkgColorKey = allPackageMap.get(booking.bookingType)?.colorKey ?? 'sky';
+        const pkgPalette = PRESET_PALETTE[pkgColorKey] ?? PRESET_PALETTE['sky'];
+        const isDarkText = pkgPalette.text !== '#ffffff';
         const textBase = isDarkText ? 'text-gray-800' : 'text-white';
-        const textSub = isDarkText ? 'text-gray-600' : 'text-white/90';
+        const textSub  = isDarkText ? 'text-gray-600' : 'text-white/90';
 
         const timeStr = `${Math.floor(booking.startTime / 60).toString().padStart(2, '0')}:${(booking.startTime % 60).toString().padStart(2, '0')}`;
         const endTime = booking.startTime + booking.duration;

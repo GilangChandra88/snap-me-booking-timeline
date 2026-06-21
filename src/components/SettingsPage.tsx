@@ -7,7 +7,10 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Trash2, Settings, Upload, Image as ImageIcon, Pencil, Check, X, Package } from 'lucide-react';
+import {
+  Plus, Trash2, Settings, Upload, Image as ImageIcon, Pencil, Check, X, Package,
+  FolderOpen, FolderPlus, ChevronDown, ChevronRight, AlertTriangle, Download,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 export type PricedItem = { id: string; name: string; price: number; category?: string };
@@ -20,6 +23,14 @@ export type BookingPackage = {
   colorKey: string;   // key dari PRESET_PALETTE
   photoUrl?: string;  // URL foto contoh di Firebase Storage
   photoPath?: string; // Storage path (untuk delete)
+  sectionId?: string; // Section yang menampung paket ini (opsional, backward compat)
+};
+
+// ─── Package Section ──────────────────────────────────────────────────────────
+export type PackageSection = {
+  id: string;
+  name: string;
+  collapsed?: boolean;
 };
 
 export type AppSettings = {
@@ -31,6 +42,7 @@ export type AppSettings = {
   localPhotoFolder: string;
   localPhotoFolder2: string;
   packages: BookingPackage[];
+  packageSections: PackageSection[];
   // Kept for backward-compat read by CashierPage (auto-synced from packages)
   packagePrices: Record<string, number>;
   addons: PricedItem[];
@@ -39,6 +51,7 @@ export type AppSettings = {
 
 // ─── Preset Color Palette ────────────────────────────────────────────────────
 export const PRESET_PALETTE: Record<string, { label: string; from: string; to: string; border: string; text: string }> = {
+  'white':    { label: 'Putih',         from: '#ffffff', to: '#f1f5f9', border: '#cbd5e1', text: '#1f2937' },
   'blue':     { label: 'Biru Tua',      from: '#60a5fa', to: '#2563eb', border: '#1d4ed8', text: '#ffffff' },
   'sky':      { label: 'Biru Muda',     from: '#bae6fd', to: '#0ea5e9', border: '#0284c7', text: '#ffffff' },
   'cyan':     { label: 'Cyan',          from: '#67e8f9', to: '#06b6d4', border: '#0891b2', text: '#ffffff' },
@@ -55,14 +68,16 @@ export const PRESET_PALETTE: Record<string, { label: string; from: string; to: s
 const DEFAULT_COLOR_KEY = 'sky';
 
 // ─── Default Settings ─────────────────────────────────────────────────────────
+const defaultSection: PackageSection = { id: 'section-default', name: 'Paket Utama' };
+
 const defaultPackages: BookingPackage[] = [
-  { id: 'pkg-1', name: 'Basic Putih',               price: 50000, availableIn: ['bawah', 'atas'], colorKey: 'blue' },
-  { id: 'pkg-2', name: 'Basic Abu',                 price: 50000, availableIn: ['bawah'],         colorKey: 'slate' },
-  { id: 'pkg-3', name: 'Basic Pink',                price: 50000, availableIn: ['bawah'],         colorKey: 'pink' },
-  { id: 'pkg-4', name: 'Basic Putih + Tirai Merah', price: 50000, availableIn: ['bawah'],         colorKey: 'rose' },
-  { id: 'pkg-5', name: 'Basic Abu + Tirai Merah',   price: 50000, availableIn: ['bawah'],         colorKey: 'red' },
-  { id: 'pkg-6', name: 'Basic Pink + Tirai Merah',  price: 50000, availableIn: ['bawah'],         colorKey: 'orange' },
-  { id: 'pkg-7', name: 'Basic Putih + Tirai Hijau', price: 50000, availableIn: ['atas'],          colorKey: 'emerald' },
+  { id: 'pkg-1', name: 'Basic Putih',               price: 50000, availableIn: ['bawah', 'atas'], colorKey: 'blue',    sectionId: 'section-default' },
+  { id: 'pkg-2', name: 'Basic Abu',                 price: 50000, availableIn: ['bawah'],         colorKey: 'slate',   sectionId: 'section-default' },
+  { id: 'pkg-3', name: 'Basic Pink',                price: 50000, availableIn: ['bawah'],         colorKey: 'pink',    sectionId: 'section-default' },
+  { id: 'pkg-4', name: 'Basic Putih + Tirai Merah', price: 50000, availableIn: ['bawah'],         colorKey: 'rose',    sectionId: 'section-default' },
+  { id: 'pkg-5', name: 'Basic Abu + Tirai Merah',   price: 50000, availableIn: ['bawah'],         colorKey: 'red',     sectionId: 'section-default' },
+  { id: 'pkg-6', name: 'Basic Pink + Tirai Merah',  price: 50000, availableIn: ['bawah'],         colorKey: 'orange',  sectionId: 'section-default' },
+  { id: 'pkg-7', name: 'Basic Putih + Tirai Hijau', price: 50000, availableIn: ['atas'],          colorKey: 'emerald', sectionId: 'section-default' },
 ];
 
 const defaultSettings: AppSettings = {
@@ -73,6 +88,7 @@ const defaultSettings: AppSettings = {
   googleDriveFolderId: '',
   localPhotoFolder: '',
   localPhotoFolder2: '',
+  packageSections: [defaultSection],
   packages: defaultPackages,
   packagePrices: Object.fromEntries(defaultPackages.map(p => [p.name, p.price])),
   addons: [],
@@ -175,12 +191,14 @@ function ColorSwatch({ colorKey, selected, onClick }: { colorKey: string; select
 // ─── Package Card ─────────────────────────────────────────────────────────────
 function PackageCard({
   pkg,
+  sections,
   onDelete,
   onUpdate,
   onPhotoUpload,
   onPhotoDelete,
 }: {
   pkg: BookingPackage;
+  sections: PackageSection[];
   onDelete: () => void;
   onUpdate: (updated: BookingPackage) => void;
   onPhotoUpload: (file: File) => Promise<void>;
@@ -296,6 +314,26 @@ function PackageCard({
           </div>
         )}
 
+        {/* Move to section */}
+        {sections.length > 1 && (
+          <div>
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Pindah ke Section</p>
+            <Select
+              value={pkg.sectionId || sections[0]?.id || ''}
+              onValueChange={val => onUpdate({ ...pkg, sectionId: val })}
+            >
+              <SelectTrigger className="h-7 text-xs">
+                <SelectValue placeholder="Pilih section" />
+              </SelectTrigger>
+              <SelectContent>
+                {sections.map(sec => (
+                  <SelectItem key={sec.id} value={sec.id}>{sec.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         {/* Color picker */}
         <div>
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Warna Blok</p>
@@ -389,20 +427,405 @@ function PackageCard({
   );
 }
 
+// ─── Section Block ─────────────────────────────────────────────────────────────
+function SectionBlock({
+  section,
+  packages,
+  allSections,
+  onRenameSection,
+  onDeleteSection,
+  onToggleCollapse,
+  onAddPackageToSection,
+  onUpdatePackage,
+  onDeletePackage,
+  onPhotoUpload,
+  onPhotoDelete,
+}: {
+  section: PackageSection;
+  packages: BookingPackage[];
+  allSections: PackageSection[];
+  onRenameSection: (id: string, name: string) => void;
+  onDeleteSection: (id: string) => void;
+  onToggleCollapse: (id: string) => void;
+  onAddPackageToSection: (sectionId: string) => void;
+  onUpdatePackage: (pkg: BookingPackage) => void;
+  onDeletePackage: (pkg: BookingPackage) => void;
+  onPhotoUpload: (pkg: BookingPackage, file: File) => Promise<void>;
+  onPhotoDelete: (pkg: BookingPackage) => Promise<void>;
+}) {
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(section.name);
+  const collapsed = section.collapsed ?? false;
+
+  const handleSaveName = () => {
+    const trimmed = draftName.trim();
+    if (!trimmed) return;
+    onRenameSection(section.id, trimmed);
+    setEditingName(false);
+  };
+
+  const handleCancelName = () => {
+    setDraftName(section.name);
+    setEditingName(false);
+  };
+
+  return (
+    <div className="rounded-2xl border-2 border-dashed border-blue-200 dark:border-blue-800/60 bg-blue-50/40 dark:bg-blue-950/10 overflow-hidden">
+      {/* Section Header */}
+      <div className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-500/10 to-sky-500/10 dark:from-blue-900/30 dark:to-sky-900/30 border-b border-blue-200 dark:border-blue-800/60">
+        <button
+          onClick={() => onToggleCollapse(section.id)}
+          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 transition-colors flex-shrink-0"
+        >
+          {collapsed
+            ? <ChevronRight className="w-5 h-5" />
+            : <ChevronDown className="w-5 h-5" />
+          }
+        </button>
+
+        <FolderOpen className="w-5 h-5 text-blue-500 dark:text-blue-400 flex-shrink-0" />
+
+        {editingName ? (
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Input
+              value={draftName}
+              onChange={e => setDraftName(e.target.value)}
+              className="h-7 text-sm font-semibold flex-1 min-w-0 border-blue-300 focus:border-blue-500"
+              autoFocus
+              onKeyDown={e => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') handleCancelName(); }}
+            />
+            <button onClick={handleSaveName} className="p-1 text-green-600 hover:text-green-700 transition-colors flex-shrink-0">
+              <Check className="w-4 h-4" />
+            </button>
+            <button onClick={handleCancelName} className="p-1 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 min-w-0">
+              <span className="font-bold text-blue-800 dark:text-blue-200 text-sm truncate block">{section.name}</span>
+              <span className="text-[10px] text-blue-500 dark:text-blue-400">{packages.length} paket</span>
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                onClick={() => setEditingName(true)}
+                className="p-1.5 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-400 hover:text-blue-600 transition-colors"
+                title="Rename section"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => onDeleteSection(section.id)}
+                className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950 text-blue-300 hover:text-red-500 transition-colors"
+                title="Hapus section"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Packages grid inside section */}
+      {!collapsed && (
+        <div className="p-4">
+          {packages.length === 0 ? (
+            <div className="text-center py-10 text-gray-400 dark:text-gray-600">
+              <Package className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <p className="text-sm font-medium">Belum ada paket di section ini.</p>
+              <p className="text-xs mt-1">Klik tombol "Tambah Paket" di bawah untuk menambahkan.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
+              {packages.map(pkg => (
+                <PackageCard
+                  key={pkg.id}
+                  pkg={pkg}
+                  sections={allSections}
+                  onUpdate={onUpdatePackage}
+                  onDelete={() => onDeletePackage(pkg)}
+                  onPhotoUpload={file => onPhotoUpload(pkg, file)}
+                  onPhotoDelete={() => onPhotoDelete(pkg)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Add package button inside section */}
+          <button
+            onClick={() => onAddPackageToSection(section.id)}
+            className="w-full py-2.5 rounded-xl border-2 border-dashed border-blue-300 dark:border-blue-700 text-blue-500 dark:text-blue-400 text-sm font-semibold flex items-center justify-center gap-2 hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all"
+          >
+            <Plus className="w-4 h-4" /> Tambah Paket ke "{section.name}"
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Add Package Modal ─────────────────────────────────────────────────────────
+function AddPackageModal({
+  open,
+  sectionId,
+  sections,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  sectionId: string;
+  sections: PackageSection[];
+  onClose: () => void;
+  onConfirm: (pkg: Omit<BookingPackage, 'id'>) => void;
+}) {
+  const [form, setForm] = useState({
+    name: '',
+    price: '',
+    colorKey: DEFAULT_COLOR_KEY,
+    bawah: true,
+    atas: false,
+    sectionId,
+  });
+
+  // Reset form saat modal buka
+  useEffect(() => {
+    if (open) {
+      setForm({ name: '', price: '', colorKey: DEFAULT_COLOR_KEY, bawah: true, atas: false, sectionId });
+    }
+  }, [open, sectionId]);
+
+  const handleConfirm = () => {
+    const name = form.name.trim();
+    if (!name) { toast.error('Nama paket tidak boleh kosong.'); return; }
+    const availableIn: ('bawah' | 'atas')[] = [
+      ...(form.bawah ? ['bawah' as const] : []),
+      ...(form.atas ? ['atas' as const] : []),
+    ];
+    if (availableIn.length === 0) { toast.error('Pilih minimal 1 studio.'); return; }
+    onConfirm({ name, price: toInt(form.price), colorKey: form.colorKey, availableIn, sectionId: form.sectionId });
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-[480px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Package className="w-5 h-5 text-blue-500" /> Tambah Paket Baru
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          {/* Section target */}
+          <div>
+            <Label className="text-xs">Masukkan ke Section</Label>
+            <Select value={form.sectionId} onValueChange={v => setForm(f => ({ ...f, sectionId: v }))}>
+              <SelectTrigger className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sections.map(sec => (
+                  <SelectItem key={sec.id} value={sec.id}>{sec.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Name */}
+          <div>
+            <Label className="text-xs">Nama Paket</Label>
+            <Input
+              className="mt-1"
+              placeholder="Contoh: Basic Merah"
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              autoFocus
+            />
+          </div>
+
+          {/* Price */}
+          <div>
+            <Label className="text-xs">Harga (Rp)</Label>
+            <Input
+              className="mt-1"
+              placeholder="50000"
+              value={form.price}
+              onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
+              inputMode="numeric"
+            />
+          </div>
+
+          {/* Studio */}
+          <div>
+            <Label className="text-xs">Aktif Di Studio</Label>
+            <div className="flex gap-2 mt-1">
+              {(['bawah', 'atas'] as const).map(studio => {
+                const active = form[studio];
+                return (
+                  <button
+                    key={studio}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, [studio]: !f[studio] }))}
+                    className={`flex-1 h-10 rounded-lg text-xs font-semibold border-2 transition-all ${
+                      active
+                        ? 'bg-blue-600 border-blue-600 text-white'
+                        : 'bg-transparent border-gray-200 dark:border-gray-700 text-gray-500'
+                    }`}
+                  >
+                    Studio {studio === 'bawah' ? 'Bawah' : 'Atas'}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Color */}
+          <div>
+            <Label className="text-xs">Warna Blok</Label>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {Object.entries(PRESET_PALETTE).map(([key, pal]) => (
+                <button
+                  key={key}
+                  type="button"
+                  title={pal.label}
+                  style={{ background: `linear-gradient(135deg, ${pal.from}, ${pal.to})` }}
+                  className={`w-8 h-8 rounded-full border-2 transition-all duration-150 shadow-sm ${
+                    form.colorKey === key ? 'border-gray-800 scale-110 ring-2 ring-offset-1 ring-gray-400' : 'border-transparent hover:scale-110'
+                  }`}
+                  onClick={() => setForm(f => ({ ...f, colorKey: key }))}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" className="flex-1" onClick={onClose}>Batal</Button>
+            <Button
+              className="flex-1 bg-gradient-to-r from-blue-500 to-sky-600 hover:from-blue-600 hover:to-sky-700 text-white"
+              onClick={handleConfirm}
+            >
+              <Plus className="w-4 h-4 mr-1" /> Tambah Paket
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Confirm Dialog ───────────────────────────────────────────────────────────
+type ConfirmDialogState = {
+  open: boolean;
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  variant?: 'danger' | 'warning' | 'info';
+  onConfirm: () => void;
+};
+
+const CONFIRM_CLOSED: ConfirmDialogState = {
+  open: false, title: '', description: '', onConfirm: () => {},
+};
+
+function ConfirmDialog({
+  state,
+  onClose,
+}: {
+  state: ConfirmDialogState;
+  onClose: () => void;
+}) {
+  const variant = state.variant ?? 'danger';
+
+  const iconBg = {
+    danger:  'bg-red-100 dark:bg-red-950',
+    warning: 'bg-amber-100 dark:bg-amber-950',
+    info:    'bg-blue-100 dark:bg-blue-950',
+  }[variant];
+
+  const iconColor = {
+    danger:  'text-red-500',
+    warning: 'text-amber-500',
+    info:    'text-blue-500',
+  }[variant];
+
+  const btnClass = {
+    danger:  'bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white shadow-red-200 dark:shadow-red-900',
+    warning: 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-amber-200 dark:shadow-amber-900',
+    info:    'bg-gradient-to-r from-blue-500 to-sky-600 hover:from-blue-600 hover:to-sky-700 text-white shadow-blue-200 dark:shadow-blue-900',
+  }[variant];
+
+  return (
+    <Dialog open={state.open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden">
+        {/* Top accent bar */}
+        <div className={`h-1 w-full ${
+          variant === 'danger' ? 'bg-gradient-to-r from-red-500 to-rose-500' :
+          variant === 'warning' ? 'bg-gradient-to-r from-amber-400 to-orange-500' :
+          'bg-gradient-to-r from-blue-500 to-sky-500'
+        }`} />
+
+        <div className="px-6 py-5">
+          <DialogHeader>
+            <div className="flex items-start gap-4">
+              {/* Icon */}
+              <div className={`flex-shrink-0 w-11 h-11 rounded-full ${iconBg} flex items-center justify-center`}>
+                {variant === 'info'
+                  ? <Download className={`w-5 h-5 ${iconColor}`} />
+                  : <AlertTriangle className={`w-5 h-5 ${iconColor}`} />
+                }
+              </div>
+              {/* Text */}
+              <div className="flex-1 min-w-0 pt-0.5">
+                <DialogTitle className="text-base font-bold text-gray-900 dark:text-gray-100 leading-snug">
+                  {state.title}
+                </DialogTitle>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1.5 leading-relaxed">
+                  {state.description}
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {/* Actions */}
+          <div className="flex gap-2.5 mt-5">
+            <Button
+              variant="outline"
+              className="flex-1 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              onClick={onClose}
+            >
+              Batal
+            </Button>
+            <Button
+              className={`flex-1 shadow-md ${btnClass}`}
+              onClick={() => { state.onConfirm(); onClose(); }}
+            >
+              {state.confirmLabel ?? 'Ya, Hapus'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export function SettingsPage() {
   const [settings, setSettingsState] = useState<AppSettings>(defaultSettings);
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'paket' | 'katalog' | 'studio'>('paket');
 
-  // New package form
-  const [newPkg, setNewPkg] = useState({
-    name: '',
-    price: '',
-    colorKey: DEFAULT_COLOR_KEY,
-    bawah: true,
-    atas: false,
-  });
+  // Add Section form
+  const [newSectionName, setNewSectionName] = useState('');
+  const [addingSection, setAddingSection] = useState(false);
+
+  // Add Package modal
+  const [addPkgModal, setAddPkgModal] = useState<{ open: boolean; sectionId: string }>({ open: false, sectionId: '' });
+
+  // Confirm dialog
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(CONFIRM_CLOSED);
+  const showConfirm = (cfg: Omit<ConfirmDialogState, 'open'>) =>
+    setConfirmDialog({ ...cfg, open: true });
 
   // Catalog item form
   const [newItem, setNewItem] = useState({ name: '', price: '', category: 'Paket Studio' });
@@ -414,7 +837,9 @@ export function SettingsPage() {
         setSettingsState({
           ...defaultSettings,
           ...data,
-          packages: data.packages?.length ? data.packages : defaultSettings.packages,
+          // Gunakan ?? agar array kosong [] tetap dihormati (bukan fallback ke default)
+          packages: data.packages ?? defaultSettings.packages,
+          packageSections: data.packageSections ?? defaultSettings.packageSections,
         });
       } else {
         setSettingsState(defaultSettings);
@@ -441,7 +866,6 @@ export function SettingsPage() {
 
   // ── Save ────────────────────────────────────────────────────────────────────
   const save = async (next: AppSettings) => {
-    // Always sync packagePrices from packages (backward compat)
     const synced: AppSettings = {
       ...next,
       packagePrices: buildPackagePrices(next.packages),
@@ -450,28 +874,73 @@ export function SettingsPage() {
     await setDoc(doc(db, 'settings', 'appSettings'), synced);
   };
 
+  // ── Section CRUD ────────────────────────────────────────────────────────────
+  const addSection = () => {
+    const name = newSectionName.trim();
+    if (!name) { toast.error('Nama section tidak boleh kosong.'); return; }
+    const dup = settings.packageSections.find(s => s.name.toLowerCase() === name.toLowerCase());
+    if (dup) { toast.error('Nama section sudah ada!'); return; }
+    const sec: PackageSection = { id: genId(), name };
+    void save({ ...settings, packageSections: [...settings.packageSections, sec] });
+    toast.success(`Section "${name}" ditambahkan!`);
+    setNewSectionName('');
+    setAddingSection(false);
+  };
+
+  const renameSection = (id: string, name: string) => {
+    const sections = settings.packageSections.map(s => s.id === id ? { ...s, name } : s);
+    void save({ ...settings, packageSections: sections });
+  };
+
+  const deleteSection = (id: string) => {
+    const sec = settings.packageSections.find(s => s.id === id);
+    const isFirstSection = settings.packageSections[0]?.id === id;
+    const pkgsInSection = settings.packages.filter(p =>
+      p.sectionId === id || (isFirstSection && !p.sectionId)
+    );
+    if (pkgsInSection.length > 0) {
+      showConfirm({
+        title: `Hapus Section "${sec?.name}"?`,
+        description: `Section ini masih memiliki ${pkgsInSection.length} paket. Semua paket di dalamnya akan ikut terhapus dan tidak bisa dikembalikan.`,
+        confirmLabel: 'Ya, Hapus Semua',
+        variant: 'danger',
+        onConfirm: () => {
+          const deletedIds = new Set(pkgsInSection.map(p => p.id));
+          const packages = settings.packages.filter(p => !deletedIds.has(p.id));
+          const sections = settings.packageSections.filter(s => s.id !== id);
+          void save({ ...settings, packages, packageSections: sections });
+          toast.success(`Section "${sec?.name}" dan ${pkgsInSection.length} paket dihapus.`);
+        },
+      });
+    } else {
+      showConfirm({
+        title: `Hapus Section "${sec?.name}"?`,
+        description: 'Section kosong ini akan dihapus permanen.',
+        confirmLabel: 'Ya, Hapus',
+        variant: 'danger',
+        onConfirm: () => {
+          const sections = settings.packageSections.filter(s => s.id !== id);
+          void save({ ...settings, packageSections: sections });
+          toast.success(`Section "${sec?.name}" dihapus.`);
+        },
+      });
+    }
+  };
+
+  const toggleCollapseSection = (id: string) => {
+    const sections = settings.packageSections.map(s => s.id === id ? { ...s, collapsed: !s.collapsed } : s);
+    // Don't persist collapse state - only update locally
+    setSettingsState(prev => ({ ...prev, packageSections: sections }));
+  };
+
   // ── Package CRUD ────────────────────────────────────────────────────────────
-  const addPackage = () => {
-    const name = newPkg.name.trim();
-    if (!name) { toast.error('Nama paket tidak boleh kosong.'); return; }
-    const availableIn: ('bawah' | 'atas')[] = [
-      ...(newPkg.bawah ? ['bawah' as const] : []),
-      ...(newPkg.atas ? ['atas' as const] : []),
-    ];
-    if (availableIn.length === 0) { toast.error('Pilih minimal 1 studio.'); return; }
+  const addPackageToSection = (data: Omit<BookingPackage, 'id'>) => {
+    const name = data.name.trim();
     const duplicate = settings.packages.find(p => p.name.toLowerCase() === name.toLowerCase());
     if (duplicate) { toast.error('Nama paket sudah ada!'); return; }
-
-    const pkg: BookingPackage = {
-      id: genId(),
-      name,
-      price: toInt(newPkg.price),
-      availableIn,
-      colorKey: newPkg.colorKey,
-    };
+    const pkg: BookingPackage = { id: genId(), ...data };
     void save({ ...settings, packages: [...settings.packages, pkg] });
     toast.success(`Paket "${name}" ditambahkan!`);
-    setNewPkg({ name: '', price: '', colorKey: DEFAULT_COLOR_KEY, bawah: true, atas: false });
   };
 
   const updatePackage = (updated: BookingPackage) => {
@@ -479,23 +948,26 @@ export function SettingsPage() {
     void save({ ...settings, packages });
   };
 
-  const deletePackage = async (pkg: BookingPackage) => {
-    if (!confirm(`Hapus paket "${pkg.name}"? Ini tidak bisa dibatalkan.`)) return;
-    // Delete photo from storage if exists
-    if (pkg.photoPath) {
-      try {
-        await deleteObject(storageRef(storage, pkg.photoPath));
-      } catch { /* ignore */ }
-    }
-    const packages = settings.packages.filter(p => p.id !== pkg.id);
-    void save({ ...settings, packages });
-    toast.success(`Paket "${pkg.name}" dihapus.`);
+  const deletePackage = (pkg: BookingPackage) => {
+    showConfirm({
+      title: `Hapus Paket "${pkg.name}"?`,
+      description: 'Paket ini akan dihapus permanen beserta foto contohnya (jika ada). Tindakan ini tidak bisa dibatalkan.',
+      confirmLabel: 'Ya, Hapus Paket',
+      variant: 'danger',
+      onConfirm: async () => {
+        if (pkg.photoPath) {
+          try { await deleteObject(storageRef(storage, pkg.photoPath)); } catch { /* ignore */ }
+        }
+        const packages = settings.packages.filter(p => p.id !== pkg.id);
+        void save({ ...settings, packages });
+        toast.success(`Paket "${pkg.name}" dihapus.`);
+      },
+    });
   };
 
   const uploadPackagePhoto = async (pkg: BookingPackage, file: File) => {
     const path = `packages/${pkg.id}/${Date.now()}_${file.name}`;
     const sRef = storageRef(storage, path);
-    // Delete old photo if exists
     if (pkg.photoPath) {
       try { await deleteObject(storageRef(storage, pkg.photoPath)); } catch { /* ignore */ }
     }
@@ -537,17 +1009,38 @@ export function SettingsPage() {
   };
 
   const importCatalog = () => {
-    if (!confirm('Apakah Anda yakin ingin mengimport Katalog Snap Me? (Ini akan menambahkan puluhan item baru ke Add-on dan Snack Anda tanpa menghapus yang sudah ada)')) return;
-    const newAddons = SNAPME_CATALOG_ADDONS.map(i => ({ id: genId(), name: i.name, price: i.price, category: i.category }));
-    const newSnacks = SNAPME_CATALOG_SNACKS.map(i => ({ id: genId(), name: i.name, price: i.price, category: i.category }));
-    const existingAddonNames = new Set(settings.addons.map(a => a.name.toLowerCase()));
-    const existingSnackNames = new Set(settings.snacks.map(a => a.name.toLowerCase()));
-    const filteredAddons = newAddons.filter(a => !existingAddonNames.has(a.name.toLowerCase()));
-    const filteredSnacks = newSnacks.filter(a => !existingSnackNames.has(a.name.toLowerCase()));
-    const next = { ...settings, addons: [...settings.addons, ...filteredAddons], snacks: [...settings.snacks, ...filteredSnacks] };
-    void save(next);
-    toast.success(`Import selesai! ${filteredAddons.length} add-on, ${filteredSnacks.length} snack baru ditambahkan.`);
+    showConfirm({
+      title: 'Import Katalog Snap Me?',
+      description: 'Puluhan item Add-on dan Snack akan ditambahkan ke katalog Anda. Item yang sudah ada tidak akan diduplikasi.',
+      confirmLabel: 'Ya, Import Sekarang',
+      variant: 'info',
+      onConfirm: () => {
+        const newAddons = SNAPME_CATALOG_ADDONS.map(i => ({ id: genId(), name: i.name, price: i.price, category: i.category }));
+        const newSnacks = SNAPME_CATALOG_SNACKS.map(i => ({ id: genId(), name: i.name, price: i.price, category: i.category }));
+        const existingAddonNames = new Set(settings.addons.map(a => a.name.toLowerCase()));
+        const existingSnackNames = new Set(settings.snacks.map(a => a.name.toLowerCase()));
+        const filteredAddons = newAddons.filter(a => !existingAddonNames.has(a.name.toLowerCase()));
+        const filteredSnacks = newSnacks.filter(a => !existingSnackNames.has(a.name.toLowerCase()));
+        const next = { ...settings, addons: [...settings.addons, ...filteredAddons], snacks: [...settings.snacks, ...filteredSnacks] };
+        void save(next);
+        toast.success(`Import selesai! ${filteredAddons.length} add-on, ${filteredSnacks.length} snack baru ditambahkan.`);
+      },
+    });
   };
+
+  // Packages yang tidak punya sectionId (legacy) — masukkan ke section pertama
+  const getPackagesForSection = (sectionId: string) => {
+    const isFirst = settings.packageSections[0]?.id === sectionId;
+    return settings.packages.filter(p => {
+      if (!p.sectionId) return isFirst; // legacy: masuk section pertama
+      return p.sectionId === sectionId;
+    });
+  };
+
+  const unsectionedPackages = settings.packages.filter(p => {
+    if (!p.sectionId) return false;
+    return !settings.packageSections.find(s => s.id === p.sectionId);
+  });
 
   // ─── Render ───────────────────────────────────────────────────────────────
   const tabs = [
@@ -597,96 +1090,90 @@ export function SettingsPage() {
 
         {/* ── TAB: Paket Foto ──────────────────────────────────────────────── */}
         {activeTab === 'paket' && (
-          <div className="space-y-6">
-            {/* Add new package form */}
-            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-              <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                <Plus className="w-4 h-4 text-blue-500" /> Tambah Paket Baru
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-                <div className="lg:col-span-1">
-                  <Label className="text-xs">Nama Paket</Label>
-                  <Input
-                    placeholder="Contoh: Basic Merah"
-                    value={newPkg.name}
-                    onChange={e => setNewPkg(p => ({ ...p, name: e.target.value }))}
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Harga (Rp)</Label>
-                  <Input
-                    placeholder="50000"
-                    value={newPkg.price}
-                    onChange={e => setNewPkg(p => ({ ...p, price: e.target.value }))}
-                    inputMode="numeric"
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Studio</Label>
-                  <div className="flex gap-2 mt-1">
-                    {(['bawah', 'atas'] as const).map(studio => {
-                      const key = studio === 'bawah' ? 'bawah' : 'atas';
-                      const active = newPkg[key];
-                      return (
-                        <button
-                          key={studio}
-                          type="button"
-                          onClick={() => setNewPkg(p => ({ ...p, [key]: !p[key] }))}
-                          className={`flex-1 h-10 rounded-lg text-xs font-semibold border-2 transition-all ${
-                            active
-                              ? 'bg-blue-600 border-blue-600 text-white'
-                              : 'bg-transparent border-gray-200 dark:border-gray-700 text-gray-500'
-                          }`}
-                        >
-                          {studio === 'bawah' ? 'Bawah' : 'Atas'}
-                        </button>
-                      );
-                    })}
+          <div className="space-y-5">
+            {/* Toolbar: Add Section */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 flex items-center gap-2">
+                {addingSection ? (
+                  <div className="flex items-center gap-2 flex-1 max-w-sm">
+                    <Input
+                      placeholder="Nama section baru..."
+                      value={newSectionName}
+                      onChange={e => setNewSectionName(e.target.value)}
+                      className="h-9 text-sm"
+                      autoFocus
+                      onKeyDown={e => { if (e.key === 'Enter') addSection(); if (e.key === 'Escape') { setAddingSection(false); setNewSectionName(''); } }}
+                    />
+                    <Button size="sm" className="h-9 bg-blue-600 hover:bg-blue-700 text-white px-3" onClick={addSection}>
+                      <Check className="w-4 h-4" />
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-9 px-3" onClick={() => { setAddingSection(false); setNewSectionName(''); }}>
+                      <X className="w-4 h-4" />
+                    </Button>
                   </div>
-                </div>
-                <div>
-                  <Label className="text-xs">Warna</Label>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {Object.entries(PRESET_PALETTE).map(([key]) => (
-                      <ColorSwatch
-                        key={key}
-                        colorKey={key}
-                        selected={newPkg.colorKey === key}
-                        onClick={() => setNewPkg(p => ({ ...p, colorKey: key }))}
-                      />
-                    ))}
-                  </div>
-                </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    className="border-blue-300 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 flex items-center gap-2"
+                    onClick={() => setAddingSection(true)}
+                  >
+                    <FolderPlus className="w-4 h-4" />
+                    Tambah Section
+                  </Button>
+                )}
               </div>
-              <Button
-                onClick={addPackage}
-                className="mt-4 bg-gradient-to-r from-blue-500 to-sky-600 hover:from-blue-600 hover:to-sky-700 text-white"
-              >
-                <Plus className="w-4 h-4 mr-2" /> Tambah Paket
-              </Button>
+              <div className="text-xs text-gray-400 dark:text-gray-500 hidden sm:block">
+                {settings.packageSections.length} section · {settings.packages.length} paket total
+              </div>
             </div>
 
-            {/* Package grid */}
-            {settings.packages.length === 0 ? (
-              <div className="text-center py-16 text-gray-400">
-                <Package className="w-12 h-12 mx-auto mb-3 opacity-40" />
-                <p className="font-medium">Belum ada paket.</p>
-                <p className="text-sm">Tambahkan paket pertama menggunakan form di atas.</p>
+            {/* Section list */}
+            {settings.packageSections.length === 0 ? (
+              <div className="text-center py-20 text-gray-400 dark:text-gray-600">
+                <FolderOpen className="w-14 h-14 mx-auto mb-3 opacity-30" />
+                <p className="font-semibold text-base">Belum ada section.</p>
+                <p className="text-sm mt-1">Klik <strong>"Tambah Section"</strong> untuk membuat section pertama, lalu tambahkan paket ke dalamnya.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                {settings.packages.map(pkg => (
-                  <PackageCard
-                    key={pkg.id}
-                    pkg={pkg}
-                    onUpdate={updatePackage}
-                    onDelete={() => void deletePackage(pkg)}
-                    onPhotoUpload={file => uploadPackagePhoto(pkg, file)}
-                    onPhotoDelete={() => deletePackagePhoto(pkg)}
+              <div className="space-y-4">
+                {settings.packageSections.map(section => (
+                  <SectionBlock
+                    key={section.id}
+                    section={section}
+                    packages={getPackagesForSection(section.id)}
+                    allSections={settings.packageSections}
+                    onRenameSection={renameSection}
+                    onDeleteSection={deleteSection}
+                    onToggleCollapse={toggleCollapseSection}
+                    onAddPackageToSection={sectionId => setAddPkgModal({ open: true, sectionId })}
+                    onUpdatePackage={updatePackage}
+                    onDeletePackage={pkg => deletePackage(pkg)}
+                    onPhotoUpload={uploadPackagePhoto}
+                    onPhotoDelete={deletePackagePhoto}
                   />
                 ))}
+
+                {/* Orphaned packages (sectionId not found) */}
+                {unsectionedPackages.length > 0 && (
+                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 p-4">
+                    <p className="text-sm font-semibold text-amber-700 dark:text-amber-300 mb-3 flex items-center gap-2">
+                      <Package className="w-4 h-4" /> Paket tanpa section ({unsectionedPackages.length})
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {unsectionedPackages.map(pkg => (
+                        <PackageCard
+                          key={pkg.id}
+                          pkg={pkg}
+                          sections={settings.packageSections}
+                          onUpdate={updatePackage}
+                          onDelete={() => deletePackage(pkg)}
+                          onPhotoUpload={file => uploadPackagePhoto(pkg, file)}
+                          onPhotoDelete={() => deletePackagePhoto(pkg)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -798,6 +1285,15 @@ export function SettingsPage() {
         )}
       </div>
 
+      {/* Add Package Modal */}
+      <AddPackageModal
+        open={addPkgModal.open}
+        sectionId={addPkgModal.sectionId}
+        sections={settings.packageSections}
+        onClose={() => setAddPkgModal(m => ({ ...m, open: false }))}
+        onConfirm={addPackageToSection}
+      />
+
       {/* Confirm Save Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[420px]">
@@ -805,7 +1301,7 @@ export function SettingsPage() {
             <DialogTitle>Konfirmasi Simpan</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Ini akan menyimpan semua setting (paket, add-on, snack, info studio) ke Firebase.
+            Ini akan menyimpan semua setting (paket, section, add-on, snack, info studio) ke Firebase.
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setOpen(false)}>Batal</Button>
@@ -818,6 +1314,12 @@ export function SettingsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Custom Confirm Dialog */}
+      <ConfirmDialog
+        state={confirmDialog}
+        onClose={() => setConfirmDialog(CONFIRM_CLOSED)}
+      />
     </div>
   );
 }
