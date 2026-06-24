@@ -43,7 +43,7 @@ export function AnalysisPage() {
             setInvoices(snap.docs.map(d => d.data() as Invoice));
         });
         const unsubUsers = onSnapshot(collection(db, 'users'), snap => {
-            setEmployees(snap.docs.map(d => d.data() as UserProfile));
+            setEmployees(snap.docs.map(d => d.data() as UserProfile).filter(u => ['owner', 'admin', 'staff'].includes(u.role as string)));
         });
         const unsubBills = onSnapshot(collection(db, 'operational_bills'), snap => {
             setBills(snap.docs.map(d => d.data() as OperationalBill));
