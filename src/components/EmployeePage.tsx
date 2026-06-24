@@ -62,7 +62,7 @@ export function EmployeePage() {
     // ─── Listen employees ─────────────────────────────────────────────────────
     useEffect(() => {
         const unsub = onSnapshot(collection(db, 'users'), snap => {
-            const list = snap.docs.map(d => d.data() as UserProfile);
+            const list = snap.docs.map(d => d.data() as UserProfile).filter(u => ['owner', 'admin', 'staff'].includes(u.role as string));
             setEmployees(list.sort((a, b) => {
                 const order: Record<string, number> = { owner: 0, admin: 1, staff: 2 };
                 const aOrder = order[a.role] ?? 99;
