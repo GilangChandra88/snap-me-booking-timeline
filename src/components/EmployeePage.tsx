@@ -64,8 +64,10 @@ export function EmployeePage() {
         const unsub = onSnapshot(collection(db, 'users'), snap => {
             const list = snap.docs.map(d => d.data() as UserProfile);
             setEmployees(list.sort((a, b) => {
-                const order = { owner: 0, admin: 1, staff: 2 };
-                return order[a.role] - order[b.role];
+                const order: Record<string, number> = { owner: 0, admin: 1, staff: 2 };
+                const aOrder = order[a.role] ?? 99;
+                const bOrder = order[b.role] ?? 99;
+                return aOrder - bOrder;
             }));
         });
         return () => unsub();
@@ -188,7 +190,12 @@ export function EmployeePage() {
         return calendarSchedules.filter(s => s.date === dateStr);
     };
 
-    const formatRp = (n?: number) => n != null ? `Rp ${n.toLocaleString('id-ID')}` : '-';
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+    const formatRp = (n?: number | string) => {
+        if (n == null || n === '') return '-';
+        const num = Number(n);
+        return !isNaN(num) ? `Rp ${num.toLocaleString('id-ID')}` : '-';
+    };
 
     return (
         <div className="h-full flex flex-col overflow-hidden bg-gray-50">
@@ -245,7 +252,7 @@ export function EmployeePage() {
 
                         <div className="grid gap-3">
                             {employees.map(emp => {
-                                const rl = ROLE_LABEL[emp.role];
+                                const rl = ROLE_LABEL[emp.role] || { label: emp.role || 'Unknown', color: 'text-gray-700', bg: 'bg-gray-100' };
                                 const isMe = emp.uid === profile?.uid;
                                 return (
                                     <div key={emp.uid} className={`bg-white rounded-xl border shadow-sm p-4 flex items-center gap-4 transition-all hover:shadow-md ${!emp.isActive ? 'opacity-60' : ''}`}>
