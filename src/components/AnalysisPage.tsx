@@ -5,8 +5,9 @@ import { useAuth, type UserProfile, type OperationalBill, type AttendanceRecord 
 import type { Invoice } from './CashierPage';
 import {
     TrendingUp, DollarSign, Users, Receipt,
-    PieChart, Activity, Briefcase, Plus, Trash2, Wallet
+    PieChart, Activity, Briefcase, Plus, Trash2, Wallet, Download
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -138,6 +139,74 @@ export function AnalysisPage() {
     };
 
     if (role !== 'owner') return <div className="p-8 text-center text-red-500">Akses Ditolak</div>;
+
+    const handleDownloadPayslip = (emp: UserProfile, hours: number, mins: number, salary: number) => {
+        const doc = new jsPDF();
+        
+        // Kop Surat
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(22);
+        doc.text("SNAP ME STUDIO", 105, 20, { align: "center" });
+        
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text("Photography & Creative Studio", 105, 26, { align: "center" });
+        doc.text("Email: admin@snapmestudio.com | Telp: +62 812-3456-7890", 105, 31, { align: "center" });
+        
+        // Garis batas kop surat
+        doc.setLineWidth(0.5);
+        doc.line(20, 35, 190, 35);
+        doc.setLineWidth(1.5);
+        doc.line(20, 36, 190, 36);
+
+        // Judul Dokumen
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.text("SLIP GAJI KARYAWAN", 105, 48, { align: "center" });
+        
+        // Periode
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "normal");
+        const [y, m] = monthFilter.split('-');
+        const monthNames = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+        const periodName = `${monthNames[parseInt(m, 10)-1]} ${y}`;
+        doc.text(`Periode: ${periodName}`, 105, 54, { align: "center" });
+
+        // Data Penerima
+        doc.setFont("helvetica", "bold");
+        doc.text("DATA PENERIMA", 20, 70);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Nama Lengkap   : ${emp.displayName}`, 20, 78);
+        doc.text(`Posisi/Jabatan : ${emp.role.toUpperCase()}`, 20, 84);
+        doc.text(`Email          : ${emp.email}`, 20, 90);
+
+        // Rincian Gaji
+        doc.setFont("helvetica", "bold");
+        doc.text("RINCIAN GAJI", 20, 105);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Total Waktu Kerja : ${hours} Jam (${mins} menit)`, 20, 113);
+        doc.text(`Gaji per Jam      : ${formatRp(emp.salary || 0)}`, 20, 119);
+        
+        doc.setFont("helvetica", "bold");
+        doc.text(`TOTAL GAJI BERSIH : ${formatRp(salary)}`, 20, 130);
+        
+        doc.setFont("helvetica", "normal");
+        doc.text("Metode Pembayaran : Tunai / Cash", 20, 138);
+
+        // Penutup
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "italic");
+        doc.text("Terima kasih atas dedikasi dan kerja keras Anda bersama tim Snap Me Studio.", 105, 155, { align: "center" });
+        
+        // Tanda Tangan
+        doc.setFont("helvetica", "normal");
+        doc.text("Hormat Kami,", 160, 175, { align: "center" });
+        doc.setFont("helvetica", "bold");
+        doc.text("Manajemen Snap Me", 160, 195, { align: "center" });
+
+        doc.save(`Slip_Gaji_${emp.displayName.replace(/\s+/g, '_')}_${periodName.replace(/\s+/g, '_')}.pdf`);
+        toast.success(`Slip gaji ${emp.displayName} berhasil diunduh!`);
+    };
 
     return (
         <div className="h-full flex flex-col overflow-hidden bg-gray-50">
@@ -356,6 +425,15 @@ export function AnalysisPage() {
                                                         </td>
                                                         <td className="px-5 py-3 text-right font-semibold text-gray-900">
                                                             {formatRp(salary)}
+                                                        </td>
+                                                        <td className="px-4 py-3 w-10">
+                                                            <button 
+                                                                onClick={() => handleDownloadPayslip(emp, hours, mins, salary)}
+                                                                className="text-gray-400 hover:text-blue-600 transition-colors"
+                                                                title="Download Slip Gaji"
+                                                            >
+                                                                <Download className="w-4 h-4" />
+                                                            </button>
                                                         </td>
                                                     </tr>
                                                 );
